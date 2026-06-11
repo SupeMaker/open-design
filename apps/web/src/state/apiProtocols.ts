@@ -81,6 +81,10 @@ export const SUGGESTED_MODELS_BY_PROTOCOL: Record<ApiProtocol, readonly string[]
     'MiniMax-M2.7-highspeed',
     'MiniMax-M2.7',
   ],
+  agnes: [
+    'agnes-2.0-flash',
+    'agnes-2.1-flash',
+  ],
   aihubmix: [
     // AIHubMix is an OpenAI-compatible aggregator that routes to OpenAI /
     // Anthropic / Gemini / DeepSeek by model name on its side. Listing the
@@ -158,6 +162,7 @@ export const FAST_MODEL_BY_PROTOCOL: Record<ApiProtocol, string> = {
   // through the Memory model picker.
   ollama: 'gemma3:4b',
   senseaudio: 'senseaudio-s2-flash',
+  agnes: 'agnes-2.1-flash',
   aihubmix: 'gpt-4o-mini',
 };
 
@@ -171,6 +176,7 @@ export const API_PROTOCOL_TABS: ReadonlyArray<{
   { id: 'google', title: 'Google Gemini' },
   { id: 'ollama', title: 'Ollama Cloud' },
   { id: 'senseaudio', title: 'SenseAudio' },
+  { id: 'agnes', title: 'Agnes' },
   { id: 'aihubmix', title: 'AIHubMix' },
 ];
 
@@ -181,6 +187,7 @@ export const API_PROTOCOL_LABELS: Record<ApiProtocol, string> = {
   google: 'Google Gemini',
   ollama: 'Ollama Cloud API',
   senseaudio: 'SenseAudio API',
+  agnes: 'Agnes API',
   aihubmix: 'AIHubMix API',
 };
 
@@ -191,6 +198,7 @@ export const API_KEY_PLACEHOLDERS: Record<ApiProtocol, string> = {
   google: 'AIza...',
   ollama: 'Ollama API key',
   senseaudio: 'SenseAudio API key',
+  agnes: 'sk-...',
   aihubmix: 'sk-...',
 };
 
@@ -204,6 +212,7 @@ export const DEFAULT_BASE_URL_BY_PROTOCOL: Record<ApiProtocol, string> = {
   google: 'https://generativelanguage.googleapis.com',
   ollama: 'https://ollama.com',
   senseaudio: 'https://api.senseaudio.cn',
+  agnes: 'https://apihub.agnes-ai.com/v1',
   aihubmix: 'https://aihubmix.com/v1',
 };
 
@@ -213,6 +222,7 @@ export const DEFAULT_BASE_URL_BY_PROTOCOL: Record<ApiProtocol, string> = {
 // form, and the top-bar switcher all resolve the same origin. Add a protocol
 // here when it's such a gateway.
 export const FIXED_ORIGIN_GATEWAYS: ReadonlySet<ApiProtocol> = new Set<ApiProtocol>([
+  'agnes',
   'aihubmix',
 ]);
 

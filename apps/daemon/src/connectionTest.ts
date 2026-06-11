@@ -722,12 +722,12 @@ function inspectProviderCompletion(
   const obj = data && typeof data === 'object' ? data as Record<string, unknown> : null;
   if (!obj) return { valid: false };
 
-  if (protocol === 'openai' || protocol === 'azure' || protocol === 'senseaudio' || protocol === 'aihubmix') {
+  if (protocol === 'openai' || protocol === 'azure' || protocol === 'senseaudio' || protocol === 'aihubmix' || protocol === 'agnes') {
     const responseModel = typeof obj.model === 'string' ? obj.model : '';
     if (
       // AIHubMix is omitted from the strict response-model check (like Azure):
       // its gateway routes by model name and may echo a normalized id.
-      (protocol === 'openai' || protocol === 'senseaudio') &&
+      (protocol === 'openai' || protocol === 'senseaudio' || protocol === 'agnes') &&
       enforceResponseModel &&
       responseModel &&
       requestedModel &&
@@ -845,7 +845,7 @@ async function validateLocalOpenAiModel(
   start: number,
   requestInit: Pick<RequestInit, 'dispatcher'> = {},
 ): Promise<ConnectionTestResponse | null> {
-  if (input.protocol !== 'openai' || !isLoopbackApiHost(parsed.hostname)) {
+  if (input.protocol !== 'openai' && input.protocol !== 'agnes' || !isLoopbackApiHost(parsed.hostname)) {
     return null;
   }
 
@@ -1061,11 +1061,11 @@ function buildProviderCall(input: ProviderTestRequest): ProviderCallShape {
       };
     case 'openai':
     case 'senseaudio':
-      // SenseAudio is wire-compatible with OpenAI (POST /v1/chat/completions,
-      // Bearer auth, identical body + response shape), so the connection
-      // smoke test reuses the same call shape. We default the base URL
-      // upstream-side in chat-routes; this layer assumes the caller passed
-      // a concrete URL via the BYOK form.
+    case 'agnes':
+      // Agnes and SenseAudio are wire-compatible with OpenAI (POST
+      // /v1/chat/completions, Bearer auth, identical body + response shape),
+      // so the connection smoke test reuses the same call shape. We default
+      // the base URL upstream-side in chat-routes; this layer assumes the
       return {
         url: appendVersionedApiPath(baseUrl, '/chat/completions'),
         headers: {

@@ -797,6 +797,7 @@ export async function startWebSidecar(runtime: SidecarRuntimeContext<SidecarStam
     return await startStandaloneNextSidecar(runtime, webRoot);
   }
 
-  const webRoot = resolveWebRoot();
+  const webRoot = resolveWebRoot(); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\web"
+
   return await startRegularNextSidecar(runtime, webRoot);
 }

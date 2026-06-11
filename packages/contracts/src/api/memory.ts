@@ -93,6 +93,7 @@ export type MemoryExtractionProvider =
   | 'google'
   | 'ollama'
   | 'senseaudio'
+  | 'agnes'
   | 'aihubmix';
 
 /** Masked version of MemoryExtractionConfig returned by GET endpoints —

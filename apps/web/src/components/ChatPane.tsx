@@ -1737,6 +1737,7 @@ export function ChatPane({
                     ? compactCount(conversations.length)
                     : `${compactCount(filteredConversations.length)} / ${compactCount(conversations.length)}`}
                   </span>
+
                 </span>
                 {onNewConversation ? (
                   <button
