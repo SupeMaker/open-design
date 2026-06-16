@@ -571,6 +571,10 @@ const API_KEY_CONSOLE_LINKS: Record<ApiProtocol, { host: string; url: string }> 
     host: 'docs.senseaudio.cn',
     url: 'https://docs.senseaudio.cn',
   },
+  agnes: {
+    host: 'apihub.agnes-ai.com',
+    url: 'https://apihub.agnes-ai.com',
+  },
   aihubmix: {
     host: 'aihubmix.com',
     url: 'https://aihubmix.com/?aff=JA1e',

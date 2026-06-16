@@ -555,6 +555,7 @@ async function sendPrompt(page: Page, prompt: string) {
 
 function tabBySuffix(page: Page, name: string): Locator {
   return page.getByTestId('file-workspace').getByRole('tab', { name: new RegExp(escapeRegExp(name), 'i') });
+
 }
 
 function currentProjectId(page: Page): string {

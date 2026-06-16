@@ -1170,8 +1170,8 @@ addSharedOptions(cli.command("check [app]", "Print status and recent logs for qu
 
 cli.help();
 
-const rawCliArgs = process.argv.slice(2);
-const cliArgs = rawCliArgs[0] === "--" ? rawCliArgs.slice(1) : rawCliArgs;
+const rawCliArgs = process.argv.slice(2); /* ["run","web",] */
+const cliArgs = rawCliArgs[0] === "--" ? rawCliArgs.slice(1) : rawCliArgs; /* ["run","web",] */
 process.argv.splice(2, process.argv.length - 2, ...cliArgs);
 
 if (cliArgs.length === 0 || (cliArgs[0]?.startsWith("-") && cliArgs[0] !== "--help" && cliArgs[0] !== "-h")) {

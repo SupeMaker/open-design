@@ -879,6 +879,45 @@ describe('loadConfig', () => {
     expect(config.baseUrl).toBe('https://aihubmix.com/v1');
   });
 
+
+  it('backfills the fixed-origin base URL for Agnes when persisted empty', () => {
+    const persisted: Partial<AppConfig> = {
+      mode: 'api',
+      apiProtocol: 'agnes',
+      apiKey: 'sk-test',
+      baseUrl: '',
+      model: 'gpt-4o',
+      configMigrationVersion: 1,
+      agentId: null,
+      skillId: null,
+      designSystemId: null,
+    };
+    store.set('open-design:config', JSON.stringify(persisted));
+
+    const config = loadConfig();
+
+    expect(config.apiProtocol).toBe('agnes');
+    expect(config.baseUrl).toBe('https://apihub.agnes-ai.com/v1');
+  });
+
+  it('infers Agnes apiProtocol for known fixed-origin base URLs', () => {
+    const legacyConfig: Partial<AppConfig> = {
+      mode: 'api',
+      apiKey: 'sk-test',
+      baseUrl: 'https://apihub.agnes-ai.com/v1',
+      model: 'gpt-4o',
+      agentId: null,
+      skillId: null,
+      designSystemId: null,
+    };
+    store.set('open-design:config', JSON.stringify(legacyConfig));
+
+    const config = loadConfig();
+
+    expect(config.apiProtocol).toBe('agnes');
+    expect(config.baseUrl).toBe('https://apihub.agnes-ai.com/v1');
+  });
+
   it('leaves a non-gateway protocol base URL untouched', () => {
     const persisted: Partial<AppConfig> = {
       mode: 'api',
