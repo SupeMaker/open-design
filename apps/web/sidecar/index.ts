@@ -5,6 +5,15 @@ import { readProcessStamp } from "@open-design/platform";
 import { startWebSidecar } from "./server.js";
 
 async function main(): Promise<void> {
+  /*
+  {
+    app: "web",
+    ipc: "\\\\.\\pipe\\open-design-default-web",
+    mode: "dev",
+    namespace: "default",
+    source: "tools-dev",
+  }
+  */
   const stamp = readProcessStamp(process.argv.slice(2), OPEN_DESIGN_SIDECAR_CONTRACT);
   if (stamp == null) throw new Error("sidecar stamp is required");
 

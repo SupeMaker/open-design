@@ -331,6 +331,13 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
       'deepseek-reasoner',
     ],
   },
+  {
+    label: 'Agnes AI',
+    protocol: 'agnes',
+    baseUrl: 'https://apihub.agnes-ai.com/v1',
+    model: 'gpt-4o',
+    models: ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+  },
 ];
 
 function normalizePet(input: Partial<PetConfig> | undefined): PetConfig {
@@ -376,6 +383,8 @@ function inferApiProtocol(model: string, baseUrl: string): ApiProtocol {
     // and the BYOK tab UI stay consistent with the protocol the user
     // picked — even though the on-wire shape is OpenAI-compatible.
     if (normalized.includes('senseaudio.cn')) return 'senseaudio';
+    // Agnes is a fixed-origin OpenAI-compatible gateway.
+    if (normalized.includes('agnes-ai.com')) return 'agnes';
     // AIHubMix host routes to its own proxy so the daemon injects the
     // APP-Code attribution header even though the wire shape is
     // OpenAI-compatible.

@@ -31,8 +31,9 @@ import type {
   McpServerConfig,
 } from '@open-design/contracts';
 import { DesignSystemPicker } from './DesignSystemPicker';
-import type { SkillSummary } from '../types';
+import type { ExecMode, SkillSummary } from '../types';
 import { Icon, type IconName } from './Icon';
+import { ExecutionModePicker } from './ExecutionModePicker';
 import { useAnalytics } from '../analytics/provider';
 import {
   trackComposerSessionModeClick,
@@ -187,6 +188,9 @@ interface Props {
   onClearWorkingDir?: () => void;
   onExamplePromptStatusChange?: (info: ExamplePromptInfo | null) => void;
   executionSwitcher?: ReactNode;
+  executionMode?: ExecMode;
+  onExecutionModeChange?: (mode: ExecMode) => void;
+  footerAccessory?: ReactNode;
 }
 
 type HomeMentionTab = 'all' | 'files' | 'plugins' | 'skills' | 'mcp' | 'connectors';
@@ -295,9 +299,12 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onSelectRecentWorkingDir,
     onClearWorkingDir,
     onExamplePromptStatusChange,
-    executionSwitcher,
-  },
-  ref,
+  executionSwitcher,
+  executionMode,
+  onExecutionModeChange,
+  footerAccessory,
+},
+ref,
 ) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
@@ -1438,6 +1445,22 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                 fileInputRef.current?.click();
               }}
             />
+            {/* {executionMode && onExecutionModeChange ? (
+              <ExecutionModePicker
+                mode={executionMode}
+                onChange={onExecutionModeChange}
+                className="home-hero__execution-mode"
+                onTrackClick={(modeBefore, modeAfter) => {
+                  trackHomeChatComposerClick(analytics.track, {
+                    page_name: 'home',
+                    area: 'chat_composer',
+                    element: 'execution_mode',
+                    mode_before: modeBefore,
+                    mode_after: modeAfter,
+                  });
+                }}
+              />
+            ) : null} */}
             {activeCreateChip ? (
               <ActiveTypeChip chip={activeCreateChip} onClear={onClearActiveChip} />
             ) : null}
@@ -1462,6 +1485,9 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
             ) : null}
           </div>
           <div className="home-hero__foot-right">
+            {footerAccessory ? (
+              <div className="home-hero__footer-accessory">{footerAccessory}</div>
+            ) : null}
             <SessionModeToggle
               mode={sessionMode}
               onChange={(next) => {

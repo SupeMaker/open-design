@@ -1186,6 +1186,7 @@ test('[P2] home designs view toggle switches between grid and kanban and persist
 });
 
 test('[P1] home designs search filters projects and recovers from no results', async ({ page }) => {
+
   test.setTimeout(60_000);
 
   const stamp = Date.now();

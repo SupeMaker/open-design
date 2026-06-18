@@ -30,6 +30,7 @@ import type { OpenDesignHostProjectImportSuccess } from '@open-design/host';
 import type { DesignSystemGenerateSnapshot } from './DesignSystemFlow';
 import { useAnalytics } from '../analytics/provider';
 import {
+  trackHomeChatComposerClick,
   trackHomeNavClick,
   trackHomeToolbarClick,
   trackOnboardingClick,
@@ -103,6 +104,7 @@ import {
 import type { PluginUseAction } from './plugins-home/useActions';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
+import { AvatarMenu } from './AvatarMenu';
 import { IntegrationsView, type IntegrationTab } from './IntegrationsView';
 import { InlineModelSwitcher } from './InlineModelSwitcher';
 import {
@@ -818,6 +820,54 @@ export function EntryShell({
                 skillsLoading={skillsLoading}
                 connectors={connectors}
                 promptTemplates={promptTemplates}
+                executionMode={config.mode}
+                onExecutionModeChange={onModeChange}
+                composerFooterAccessory={(
+                  <AvatarMenu
+                    config={config}
+                    agents={agents}
+                    daemonLive={daemonLive}
+                    onModeChange={onModeChange}
+                    onOpen={() => {
+                      trackHomeChatComposerClick(analytics.track, {
+                        page_name: 'home',
+                        area: 'chat_composer',
+                        element: 'agent_selector_open',
+                      });
+                    }}
+                    onAgentChange={(id) => {
+                      trackHomeChatComposerClick(analytics.track, {
+                        page_name: 'home',
+                        area: 'chat_composer',
+                        element: 'agent_select',
+                        agent_id: id,
+                      });
+                      onAgentChange(id);
+                    }}
+                    onAgentModelChange={(agentId, choice) => {
+                      trackHomeChatComposerClick(analytics.track, {
+                        page_name: 'home',
+                        area: 'chat_composer',
+                        element: 'agent_model_select',
+                        agent_id: agentId,
+                        ...(choice?.model ? { model_id: choice.model } : {}),
+                      });
+                      onAgentModelChange(agentId, choice);
+                    }}
+                    onApiModelChange={(model) => {
+                      trackHomeChatComposerClick(analytics.track, {
+                        page_name: 'home',
+                        area: 'chat_composer',
+                        element: 'agent_model_select',
+                        model_id: model,
+                      });
+                      onApiModelChange?.(model);
+                    }}
+                    onOpenSettings={onOpenSettings}
+                    onRefreshAgents={onRefreshAgents}
+                    placement="up"
+                  />
+                )}
               />
             </div>
             <div data-testid="entry-view-projects" data-active={view === 'projects' ? 'true' : 'false'} {...inactiveViewProps(view === 'projects')}>

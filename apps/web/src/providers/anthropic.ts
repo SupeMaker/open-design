@@ -67,7 +67,12 @@ export async function streamMessage(
   if (cfg.apiProtocol === 'aihubmix') {
     return streamMessageAIHubMix(cfg, system, history, signal, handlers, context);
   }
-  if (cfg.apiProtocol === 'openai' || (!cfg.apiProtocol && isOpenAICompatible(cfg.model, cfg.baseUrl))) {
+
+  if (
+    cfg.apiProtocol === 'openai' ||
+    cfg.apiProtocol === 'agnes' ||
+    (!cfg.apiProtocol && isOpenAICompatible(cfg.model, cfg.baseUrl))
+  ) {
     return streamMessageOpenAI(cfg, system, history, signal, handlers);
   }
 
