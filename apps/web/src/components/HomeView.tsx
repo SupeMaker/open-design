@@ -56,6 +56,7 @@ import { openFolderDialog, fetchRecentLinkedDirs, pushRecentLinkedDir } from '..
 import { isOpenDesignHostAvailable, pickHostWorkingDir } from '@open-design/host';
 import type {
   DesignSystemSummary,
+  ExecMode,
   Project,
   ProjectMetadata,
   PromptTemplateSummary,
@@ -212,12 +213,43 @@ interface Props {
   connectors?: ConnectorDetail[];
   promptTemplates?: PromptTemplateSummary[];
   executionSwitcher?: ReactNode;
+  executionMode?: ExecMode;
+  onExecutionModeChange?: (mode: ExecMode) => void;
+  composerFooterAccessory?: ReactNode;
 }
 
 const EMPTY_DESIGN_SYSTEMS: DesignSystemSummary[] = [];
 const EMPTY_SKILLS: SkillSummary[] = [];
 const EMPTY_CONNECTORS: ConnectorDetail[] = [];
 const EMPTY_PROMPT_TEMPLATES: PromptTemplateSummary[] = [];
+
+// Per-session localStorage cache for the home working-directory picker.
+// Unlike the project-bound composer cache, the home surface has no project id
+// yet, so a single key keeps the last explicit pick across page refreshes.
+const HOME_WORKING_DIR_CACHE_KEY = 'od:home-working-dir:v1';
+
+function readCachedHomeWorkingDir(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(HOME_WORKING_DIR_CACHE_KEY);
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedHomeWorkingDir(dir: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (dir) {
+      window.localStorage.setItem(HOME_WORKING_DIR_CACHE_KEY, dir);
+    } else {
+      window.localStorage.removeItem(HOME_WORKING_DIR_CACHE_KEY);
+    }
+  } catch {
+    // Storage failures are non-fatal; the daemon remains the source of truth.
+  }
+}
 
 export function HomeView({
   isActive = true,
@@ -238,6 +270,9 @@ export function HomeView({
   connectors = EMPTY_CONNECTORS,
   promptTemplates = EMPTY_PROMPT_TEMPLATES,
   executionSwitcher,
+  executionMode,
+  onExecutionModeChange,
+  composerFooterAccessory,
 }: Props) {
   const { locale, t } = useI18n();
   const analytics = useAnalytics();
@@ -270,7 +305,7 @@ export function HomeView({
   const [selectedMcpContexts, setSelectedMcpContexts] = useState<SelectedMcpContext[]>([]);
   const [selectedConnectorContexts, setSelectedConnectorContexts] = useState<SelectedConnectorContext[]>([]);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-  const [workingDir, setWorkingDir] = useState<string | null>(null);
+  const [workingDir, setWorkingDir] = useState<string | null>(() => readCachedHomeWorkingDir());
   // Token paired with `workingDir` when picked through the desktop host's
   // native dialog. Spent on the post-creation working-dir POST so the
   // daemon's desktop-auth gate accepts the path. Null for web picks.
@@ -295,6 +330,11 @@ export function HomeView({
     const persisted = await pushRecentLinkedDir(dir);
     setRecentDirs(persisted);
   }, []);
+  // Persist the home working-directory pick so a page refresh does not force
+  // the user to re-select it. Writes happen after every explicit change/clear.
+  useEffect(() => {
+    writeCachedHomeWorkingDir(workingDir);
+  }, [workingDir]);
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [mcpLoading, setMcpLoading] = useState(true);
   const [prompt, setPrompt] = useState('');
@@ -1646,6 +1686,9 @@ export function HomeView({
         }}
         onExamplePromptStatusChange={handleExamplePromptStatusChange}
         executionSwitcher={executionSwitcher}
+        executionMode={executionMode}
+        onExecutionModeChange={onExecutionModeChange}
+        footerAccessory={composerFooterAccessory}
       />
 
       <RecentProjectsStrip

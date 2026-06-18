@@ -2411,7 +2411,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
             ) : null}
             {leadingAccessory}
             <span className="composer-spacer" />
-            {footerAccessory}
+            {footerAccessory} {/* 这里引入模型选择器 */}
             <SessionModeToggle
               mode={sessionMode}
               onChange={(next) => {

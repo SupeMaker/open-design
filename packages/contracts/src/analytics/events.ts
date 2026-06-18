@@ -1151,7 +1151,14 @@ export interface HomeChatComposerClickProps {
     // jumping to the add-resource surface (`resource_kind`).
     | 'plus_menu_open'
     | 'plus_pick'
-    | 'plus_add';
+    | 'plus_add'
+    // CLI/BYOK execution-mode switch in the home composer toolbar.
+    | 'execution_mode'
+    // Agent/model selector in the home composer toolbar (mirrors the
+    // chat_panel composer's `agent_*` elements).
+    | 'agent_selector_open'
+    | 'agent_select'
+    | 'agent_model_select';
   // For `plus_pick` / `plus_add`: which kind of resource (and its id on pick).
   resource_kind?: 'connector' | 'plugin' | 'mcp';
   resource_id?: string;
@@ -1163,6 +1170,12 @@ export interface HomeChatComposerClickProps {
   // For `example_prompt` cards backed by a plugin preset: which preset.
   plugin_id?: string;
   plugin_type?: string;
+  // For `execution_mode` only — the mode before/after the user flipped the switch.
+  mode_before?: 'daemon' | 'api';
+  mode_after?: 'daemon' | 'api';
+  // For `agent_select` / `agent_model_select` only.
+  agent_id?: string;
+  model_id?: string;
 }
 
 export interface UpdateIndicatorClickProps {

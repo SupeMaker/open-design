@@ -66,7 +66,14 @@ type StandaloneBackend = {
 
 function createNextApp(options: { dev: boolean; dir: string } & NextBundlerOptions): NextApp {
   const createNextServer = require("next") as (nextOptions: { dev: boolean; dir: string } & NextBundlerOptions) => NextApp;
-  return createNextServer(options);
+  return createNextServer(options); 
+  /*
+  options:{
+    dev: true,
+    dir: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\web",
+    webpack: true,
+  }
+  */
 }
 
 export function resolveNextBundlerOptions(isDev: boolean): NextBundlerOptions {
@@ -450,7 +457,7 @@ async function proxyHttpRequest(
 }
 
 async function prepareNextApp(app: { prepare(): Promise<void> }, dir: string): Promise<void> {
-  const nextEnvPath = join(dir, "next-env.d.ts");
+  const nextEnvPath = join(dir, "next-env.d.ts"); // C:\Users\17875\Master\projects\github\open-design\apps\web\next-env.d.ts
   const previousNextEnv = await readFile(nextEnvPath, "utf8").catch(() => null);
   await app.prepare();
   if (previousNextEnv == null) {

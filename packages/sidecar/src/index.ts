@@ -518,13 +518,13 @@ async function prepareIpcPath(socketPath: string): Promise<void> {
 }
 
 export async function createJsonIpcServer({
-  handler,
-  socketPath,
+  handler, // 处理请求的异步函数，接收解析后的 JSON，返回结果
+  socketPath, // 套接字文件路径（Unix）或命名管道路径（Windows）
 }: {
   handler: JsonIpcHandler;
   socketPath: string;
 }): Promise<JsonIpcServerHandle> {
-  await prepareIpcPath(socketPath);
+  await prepareIpcPath(socketPath); // 可能确保父目录存在、或删除旧的套接字文件，防止 listen 时地址被占用。
   const server = createNetServer((socket) => {
     let buffer = "";
     socket.on("error", () => {});

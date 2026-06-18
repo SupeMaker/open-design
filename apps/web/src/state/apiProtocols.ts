@@ -87,6 +87,9 @@ export const SUGGESTED_MODELS_BY_PROTOCOL: Record<ApiProtocol, readonly string[]
   agnes: [
     'agnes-2.0-flash',
     'agnes-2.1-flash',
+    "agnes-image-2.0-flash",
+    "agnes-image-2.1-flash",
+    "agnes-video-v2.0"
   ],
   aihubmix: [
     // AIHubMix is an OpenAI-compatible aggregator that routes to OpenAI /

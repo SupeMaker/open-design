@@ -879,6 +879,20 @@
   gap: 8px;
   flex: 0 0 auto;
 }
+/* Execution-mode picker sits in the home composer's bottom-left toolbar.
+   Override the in-input modifier so it centers vertically with the other
+   foot-left controls and uses the row's gap instead of its own margin. */
+.home-hero__execution-mode.execution-mode-picker--in-input {
+  align-self: center;
+  margin: 0;
+}
+/* Model/agent selector rendered to the left of the SessionModeToggle
+   (design/code/chat) in the home composer's bottom-right toolbar. */
+.home-hero__footer-accessory {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
 .home-hero__execution-switcher {
   display: inline-flex;
   min-width: 0;
