@@ -424,7 +424,6 @@ export function createClaudeStreamHandler(
         if (!isRecord(block)) continue;
         if (block.type === 'tool_use') {
           if (typeof block.id === 'string' && streamedToolUseIds.has(block.id)) {
-            streamedToolUseIds.delete(block.id);
             continue;
           }
           emitToolUse(block.id, block.name, block.input ?? null);
@@ -490,7 +489,10 @@ export function createClaudeStreamHandler(
         usage: obj.usage ?? null,
         costUsd: obj.total_cost_usd ?? null,
         durationMs: obj.duration_ms ?? null,
-        stopReason: obj.stop_reason ?? null,
+        stopReason:
+          (typeof obj.stop_reason === 'string' && obj.stop_reason) ||
+          (typeof obj.terminal_reason === 'string' && obj.terminal_reason) ||
+          null,
       });
       return;
     }

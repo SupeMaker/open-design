@@ -587,7 +587,10 @@ describe('structured agent stream fixtures', () => {
       type: 'assistant',
       message: {
         id: 'msg-1',
-        content: [{ type: 'tool_use', id: 'toolu-1', name: 'Write', input: {} }],
+        content: [
+          { type: 'tool_use', id: 'toolu-1', name: 'Write', input: {} },
+          { type: 'tool_use', id: 'toolu-1', name: 'Write', input: {} },
+        ],
       },
     })}\n`);
     handler.flush();
@@ -890,6 +893,27 @@ describe('structured agent stream fixtures', () => {
       && event !== null
       && (event as { type?: string }).type === 'thinking_delta'
     ))).toEqual([{ type: 'thinking_delta', delta: 'Plan from wrapper.' }]);
+  });
+
+  it('maps Claude result terminal_reason into usage stopReason', () => {
+    const events: unknown[] = [];
+    const handler = createClaudeStreamHandler((event: unknown) => events.push(event));
+
+    handler.feed(`${JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      terminal_reason: 'completed',
+      duration_ms: 42,
+    })}\n`);
+    handler.flush();
+
+    expect(events).toContainEqual({
+      type: 'usage',
+      usage: null,
+      costUsd: null,
+      durationMs: 42,
+      stopReason: 'completed',
+    });
   });
 
   it('emits TodoWrite tool_use from Pi RPC tool_execution events', () => {
