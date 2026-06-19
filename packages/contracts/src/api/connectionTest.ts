@@ -3,6 +3,7 @@
 // and returns it inside a JSON envelope (always HTTP 200 — see notes in the
 // daemon module for why).
 import type { AgentCliEnvPrefs } from './app-config';
+import type { ReasoningExecutionRequestFields } from './reasoningExecution';
 
 export interface BaseUrlValidationResult {
   parsed?: ParsedBaseUrl;
@@ -181,7 +182,7 @@ export interface ConnectionTestDiagnostics {
 export type ConnectionTestProtocol = 'anthropic' | 'openai' | 'azure' | 'google' | 'ollama' | 'senseaudio' | 'agnes' | 'aihubmix';
 
 
-export interface ProviderTestRequest {
+export interface ProviderTestRequest extends ReasoningExecutionRequestFields {
   protocol: ConnectionTestProtocol;
   baseUrl: string;
   apiKey: string;
