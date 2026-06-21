@@ -335,8 +335,8 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     label: 'Agnes AI',
     protocol: 'agnes',
     baseUrl: 'https://apihub.agnes-ai.com/v1',
-    model: 'gpt-4o',
-    models: ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+    model: 'agnes-2.1-flash',
+    models: ['agnes-2.1-flash', 'agnes-2.0-flash', "agnes-image-2.0-flash", "agnes-image-2.1-flash"],
   },
 ];
 

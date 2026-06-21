@@ -900,16 +900,16 @@ export function ProjectView({
     if (chatPanelPageViewFiredRef.current === project.id) return;
     chatPanelPageViewFiredRef.current = project.id;
     trackPageView(analytics.track, { page_name: 'chat_panel' });
-    // Onboarding's 4th step ("生成进度页") fires here, not in
-    // `DesignSystemDetailView`: the Generate path navigates
-    // straight to the project's chat_panel, not to the design
-    // system detail surface. If an onboarding session id is still
-    // in sessionStorage we stamp the funnel's last row here and
-    // clear so any later DS visit doesn't inherit the attribution.
-    // E2E (2026-05-21) confirmed this is the only path users
-    // actually take — observed: page_view chat_panel fires, but
-    // page_view design_system_project never did because that
-    // route isn't visited from the embedded onboarding generate.
+    // 新手引导的第4步（"生成进度页"）在这里触发，而不是在
+    // `DesignSystemDetailView` 中触发：生成路径直接导航到
+    // 项目的 chat_panel（聊天面板），而不是设计系统详情页面。
+    // 如果 sessionStorage 中仍存在新手引导的会话 ID，
+    // 我们在这里标记漏斗的最后一行并清除它，
+    // 这样后续任何对设计系统的访问都不会继承该归因。
+    // E2E 测试（2026-05-21）确认这是用户实际执行的唯一路径 ——
+    // 观察到：page_view chat_panel 事件会触发，但
+    // page_view design_system_project 从未触发，
+    // 因为从嵌入式新手引导的生成功能出发，不会访问那个路由。
     const onboardingSessionId = peekOnboardingSessionId();
     if (onboardingSessionId) {
       trackPageView(analytics.track, {
@@ -3431,251 +3431,373 @@ export function ProjectView({
     }
   }, [enqueueChatSend, project.id]);
 
-  const handleSend = useCallback(
+ const handleSend = useCallback(
     async (
-      prompt: string,
-      attachments: ChatAttachment[],
-      commentAttachments: ChatCommentAttachment[] = commentsToAttachments(attachedComments),
-      meta?: ProjectChatSendMeta,
-      baseMessages?: ChatMessage[],
+      prompt: string, // 用户输入的提示文本
+      attachments: ChatAttachment[], // 聊天附件列表（文件、图片等）
+      commentAttachments: ChatCommentAttachment[] = commentsToAttachments(attachedComments), // 将附加评论转换为评论附件格式，默认值为转换后的评论附件
+      meta?: ProjectChatSendMeta, // 可选的发送元数据，包含会话模式、重试目标等信息
+      baseMessages?: ChatMessage[], // 可选的基础消息列表，用于指定消息历史
     ) => {
+      // 记录发送时的参数信息，用于调试
+      console.log('handleSend: ', { prompt, attachments, commentAttachments, meta, baseMessages });
+      
+      // 如果没有活跃的会话ID，终止发送操作
       if (!activeConversationId) return false;
+      
+      // 如果当前消息所属的会话ID与活跃会话ID不匹配，终止发送操作（防止并发问题）
       if (messagesConversationIdRef.current !== activeConversationId) return false;
+      
+      // 确定运行会话模式：优先使用meta中指定的模式，否则使用当前活跃的会话模式
       const runSessionMode = meta?.sessionMode ?? activeSessionMode;
+      
+      // 解析重试目标：如果指定了要重试的助手消息ID，在消息列表中查找对应的消息及其上下文
       const retryTarget = meta?.retryOfAssistantId
         ? resolveRetryTarget(messages, meta.retryOfAssistantId)
         : null;
+      
+      // 如果指定了重试目标但未找到，终止操作（无效的重试请求）
       if (meta?.retryOfAssistantId && !retryTarget) return false;
+      
+      // 确定运行上下文：优先使用meta中指定的上下文，否则使用重试目标中用户消息的上下文
       const runContext = meta?.context ?? retryTarget?.userMsg.runContext;
+      
+      // 确定历史基础消息：如果是重试操作，使用重试目标之前的消息；否则使用传入的基础消息或当前消息列表
       const historyBase = retryTarget ? retryTarget.priorMessages : baseMessages ?? messages;
+      
+      // 验证输入有效性：非重试操作时，如果提示为空、无附件且无评论附件，终止操作
       if (
         !retryTarget &&
         !prompt.trim() &&
         attachments.length === 0 &&
         commentAttachments.length === 0
       ) return false;
+      
+      // 合并所有附件：将普通附件和评论中的图片附件合并为统一的附件列表
       const effectiveAttachments = mergeChatAttachments(
         attachments,
         ...commentAttachments.map((attachment) =>
-          chatAttachmentsFromPreviewCommentImages(attachment.imageAttachments),
+          chatAttachmentsFromPreviewCommentImages(attachment.imageAttachments), // 从评论附件中提取图片并转换为聊天附件格式
         ),
       );
+      
+      // 处理仅加入队列的情况：非重试操作且指定仅加入队列时，将消息放入待发送队列
       if (!retryTarget && meta?.queueOnly) {
         queueChatSendForCurrentConversation({
-          conversationId: activeConversationId,
-          prompt,
-          attachments: effectiveAttachments,
-          commentAttachments,
-          meta: { ...(meta ?? {}), sessionMode: runSessionMode },
+          conversationId: activeConversationId, // 当前会话ID
+          prompt, // 用户提示文本
+          attachments: effectiveAttachments, // 合并后的附件列表
+          commentAttachments, // 评论附件列表
+          meta: { ...(meta ?? {}), sessionMode: runSessionMode }, // 展开元数据并设置会话模式
         });
-        return false;
+        return false; // 返回false表示消息已加入队列但未立即发送
       }
+      
+      // 如果当前会话正忙（有消息正在处理中），将新消息加入队列等待处理
       if (currentConversationBusy) {
         queueChatSendForCurrentConversation({
-          conversationId: activeConversationId,
-          prompt,
-          attachments: effectiveAttachments,
-          commentAttachments,
-          meta: { ...(meta ?? {}), sessionMode: runSessionMode },
+          conversationId: activeConversationId, // 当前会话ID
+          prompt, // 用户提示文本
+          attachments: effectiveAttachments, // 合并后的附件列表
+          commentAttachments, // 评论附件列表
+          meta: { ...(meta ?? {}), sessionMode: runSessionMode }, // 展开元数据并设置会话模式
         });
-        return false;
+        return false; // 返回false表示消息已加入队列等待处理
       }
+      
+      // 清除聊天种子值，准备新的消息生成
       setChatSeed(null);
+      
+      // 记录当前正在运行的会话ID
       const runConversationId = activeConversationId;
+      
+      // 清除之前的错误状态，准备新的消息发送
       setError(null);
+      
+      // 记录消息开始时间戳，用于计算响应时长
       const startedAt = Date.now();
+      
+      // 构建用户消息对象：如果是重试则使用原有的用户消息，否则创建新的用户消息
       const userMsg: ChatMessage = retryTarget?.userMsg ?? {
-        id: randomUUID(),
-        role: 'user',
-        content: prompt,
-        createdAt: startedAt,
-        sessionMode: runSessionMode,
+        id: randomUUID(), // 生成唯一消息ID
+        role: 'user', // 消息角色为用户
+        content: prompt, // 消息内容
+        createdAt: startedAt, // 创建时间戳
+        sessionMode: runSessionMode, // 会话模式
         ...(meta?.appliedPluginSnapshot
-          ? { appliedPluginSnapshot: meta.appliedPluginSnapshot }
+          ? { appliedPluginSnapshot: meta.appliedPluginSnapshot } // 如果有应用插件快照，添加到消息中
           : {}),
-        ...(runContext ? { runContext } : {}),
-        attachments: effectiveAttachments.length > 0 ? effectiveAttachments : undefined,
-        commentAttachments: commentAttachments.length > 0 ? commentAttachments : undefined,
+        ...(runContext ? { runContext } : {}), // 如果有运行上下文，添加到消息中
+        attachments: effectiveAttachments.length > 0 ? effectiveAttachments : undefined, // 有效附件列表（空数组时设为undefined）
+        commentAttachments: commentAttachments.length > 0 ? commentAttachments : undefined, // 评论附件列表（空数组时设为undefined）
       };
+      
+      // 获取最终要使用的评论附件列表
       const runCommentAttachments = userMsg.commentAttachments ?? [];
+      
+      // 合并用户消息中的附件和评论附件中的图片，形成最终发送的附件列表
       const runAttachments = mergeChatAttachments(
         userMsg.attachments ?? [],
         ...runCommentAttachments.map((attachment) =>
-          chatAttachmentsFromPreviewCommentImages(attachment.imageAttachments),
+          chatAttachmentsFromPreviewCommentImages(attachment.imageAttachments), // 从评论附件中提取图片并转换格式
         ),
       );
+      
+      // 确定选择的代理：仅在守护进程模式且指定了代理ID时获取代理对象
       const selectedAgent =
         config.mode === 'daemon' && config.agentId
-          ? agentsById.get(config.agentId)
+          ? agentsById.get(config.agentId) // 根据代理ID从映射中获取代理对象
           : null;
+      
+      // 确定选择的代理模型配置：仅在守护进程模式且指定了代理ID时获取对应的模型配置
       const selectedAgentChoice =
         config.mode === 'daemon' && config.agentId
-          ? config.agentModels?.[config.agentId]
+          ? config.agentModels?.[config.agentId] // 获取指定代理的模型选择配置
           : undefined;
+      
+      // 获取有效的代理模型选择：根据代理对象和模型配置计算出最终要使用的模型
       const effectiveSelectedAgentChoice = effectiveAgentModelChoice(
         selectedAgent,
         selectedAgentChoice,
       );
+      
+      // 确定助手消息的代理ID：守护进程模式使用配置的代理ID，否则根据API协议获取
       const assistantAgentId =
         config.mode === 'daemon'
-          ? config.agentId ?? undefined
-          : apiProtocolAgentId(config.apiProtocol);
+          ? config.agentId ?? undefined // 守护进程模式下使用配置的代理ID
+          : apiProtocolAgentId(config.apiProtocol); // 其他模式下根据API协议获取代理ID
+      
+      // 确定助手消息的显示名称：守护进程模式显示代理模型名称，否则显示API协议模型标签
       const assistantAgentName =
         config.mode === 'daemon'
           ? agentModelDisplayName(
-              config.agentId,
-              selectedAgent?.name,
-              effectiveSelectedAgentChoice?.model,
+              config.agentId, // 代理ID
+              selectedAgent?.name, // 代理名称
+              effectiveSelectedAgentChoice?.model, // 选中的模型名称
             )
-          : apiProtocolModelLabel(config.apiProtocol, config.model);
+          : apiProtocolModelLabel(config.apiProtocol, config.model); // API协议模式显示模型标签
+      
+      // 记录当前项目文件的名称列表，用于跟踪对话前的文件状态
       const preTurnFileNames = projectFiles.map((f) => f.name);
+      
+      // 生成助手消息的唯一ID
       const assistantId = randomUUID();
+      
+      // 构建初始助手消息对象，内容为空，状态为运行中
       const assistantMsg: ChatMessage = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        agentId: assistantAgentId,
-        agentName: assistantAgentName,
-        events: [],
-        createdAt: startedAt,
-        runStatus: config.mode === 'daemon' ? 'running' : undefined,
-        startedAt,
-        preTurnFileNames,
+        id: assistantId, // 助手消息ID
+        role: 'assistant', // 消息角色为助手
+        content: '', // 初始内容为空，后续通过事件流填充
+        agentId: assistantAgentId, // 助手代理ID
+        agentName: assistantAgentName, // 助手代理显示名称
+        events: [], // 事件列表初始为空，用于记录消息生成过程
+        createdAt: startedAt, // 创建时间与用户消息相同
+        runStatus: config.mode === 'daemon' ? 'running' : undefined, // 守护进程模式下标记为运行中状态
+        startedAt, // 开始时间戳
+        preTurnFileNames, // 对话前的项目文件名称列表
       };
+      
+      // 保存最新的助手消息引用，用于后续状态更新
       let latestAssistantMsg: ChatMessage = assistantMsg;
+      
+      // 定义更新会话最新运行状态的函数，用于跟踪消息处理的进度和结果
       const updateConversationLatestRun = (
-        status: NonNullable<ChatMessage['runStatus']>,
-        endedAt?: number,
+        status: NonNullable<ChatMessage['runStatus']>, // 运行状态（非空）：running、completed、error等
+        endedAt?: number, // 可选的结束时间戳
       ) => {
+        // 更新会话列表，找到正在运行的会话并设置其最新运行状态
         setConversations((curr) =>
           curr.map((conversation) =>
-            conversation.id === runConversationId
+            conversation.id === runConversationId // 匹配当前运行的会话ID
               ? {
-                  ...conversation,
-                  updatedAt: endedAt ?? startedAt,
+                  ...conversation, // 保留会话的其他属性
+                  updatedAt: endedAt ?? startedAt, // 更新时间：有结束时间则使用结束时间，否则使用开始时间
                   latestRun: {
-                    status,
-                    startedAt,
+                    status, // 设置运行状态
+                    startedAt, // 开始时间戳
                     ...(endedAt === undefined
-                      ? {}
+                      ? {} // 如果未提供结束时间，不设置结束相关属性
                       : {
-                          endedAt,
-                          durationMs: Math.max(0, endedAt - startedAt),
+                          endedAt, // 结束时间戳
+                          durationMs: Math.max(0, endedAt - startedAt), // 计算运行时长（毫秒），确保非负
                         }),
                   },
                 }
-              : conversation,
+              : conversation, // 不匹配的会话保持原样
           ),
         );
       };
+      // 将当前助手消息ID添加到活跃完成通知运行集合中，用于跟踪正在进行的运行
       activeCompletionNotificationRunsRef.current.add(assistantId);
+      
+      // 构建下一个历史消息列表：如果是重试，使用重试目标之前的历史加用户消息；否则使用基础历史加用户消息
       const nextHistory = retryTarget
-        ? [...retryTarget.priorMessages, userMsg]
-        : [...historyBase, userMsg];
+        ? [...retryTarget.priorMessages, userMsg] // 重试：保留之前的历史，追加新的用户消息
+        : [...historyBase, userMsg]; // 非重试：在基础历史上追加用户消息
+      
+      // 构建可见消息列表：如果是重试，在历史后追加保留的尝试记录和助手消息；否则直接追加助手消息
       const nextVisibleMessages = retryTarget
-        ? [...nextHistory, ...retryTarget.preservedAttempts, assistantMsg]
-        : [...nextHistory, assistantMsg];
+        ? [...nextHistory, ...retryTarget.preservedAttempts, assistantMsg] // 重试：包含之前失败的尝试记录
+        : [...nextHistory, assistantMsg]; // 非重试：仅追加助手消息
+      
+      // 更新UI中的消息列表为新的可见消息
       setMessages(nextVisibleMessages);
+      
+      // 标记该会话为流式传输状态，用于UI显示加载动画等
       markStreamingConversation(runConversationId);
+      
+      // 更新会话的最新运行状态：守护进程模式标记为'running'，其他模式标记为'queued'（排队中）
       updateConversationLatestRun(config.mode === 'daemon' ? 'running' : 'queued');
+      
+      // 清除当前工件（artifact）状态，准备接收新的生成内容
       setArtifact(null);
+      
+      // 清除已保存工件的引用
       savedArtifactRef.current = null;
+      
+      // 触发项目触摸事件，更新项目的最后活动时间
       onTouchProject();
+      
+      // 如果不是重试操作，将用户消息持久化到存储中
       if (!retryTarget) persistMessage(userMsg);
-      // Intentionally do NOT persist `assistantMsg` here. In daemon mode it
-      // starts as runStatus='running' with no runId, which the source-level
-      // guard treats as a phantom — the first DB write happens inside
-      // `onRunCreated` (below) once POST /api/runs returns a runId. In API
-      // mode there is no runStatus, and the buffered text path will persist
-      // as soon as the first delta lands.
+      
+      // 有意不在此处持久化助手消息。在守护进程模式下，助手消息以runStatus='running'且无runId的状态开始，
+      // 源码级别的守卫将其视为幻影消息——第一次数据库写入发生在下面的onRunCreated中，
+      // 当POST /api/runs返回runId时才进行。在API模式下没有runStatus，
+      // 缓冲文本路径将在第一个增量内容到达时立即持久化。
       persistMessage(assistantMsg);
+      
+      // 如果有评论附件，标记它们为"正在应用"状态，并从待处理评论列表中移除
       if (runCommentAttachments.length > 0) {
+        // 异步更新评论附件的状态为'applying'（应用中）
         void patchAttachedStatuses(runCommentAttachments, 'applying');
+        
+        // 创建已消费评论ID的集合，用于过滤
         const consumedCommentIds = new Set(runCommentAttachments.map((attachment) => attachment.id));
+        
+        // 从附加评论列表中移除已消费的评论
         setAttachedComments((current) =>
           current.filter((comment) => !consumedCommentIds.has(comment.id)),
         );
       }
+      
+      // 判断是否为对话的第一个轮次：非重试且历史消息列表为空
       const isFirstTurn = !retryTarget && historyBase.length === 0;
+      
+      // 生成备用首轮标题：如果是设计系统工作区提示，使用专用标题；否则使用提示摘要或截断的提示文本
       const fallbackFirstTurnTitle = isDesignSystemWorkspacePrompt(prompt)
-        ? DESIGN_SYSTEM_WORKSPACE_DISPLAY_TITLE
-        : summarizeProjectNameFromPrompt(prompt) || prompt.slice(0, 60).trim();
+        ? DESIGN_SYSTEM_WORKSPACE_DISPLAY_TITLE // 设计系统工作区的专用显示标题
+        : summarizeProjectNameFromPrompt(prompt) || prompt.slice(0, 60).trim(); // 从提示生成摘要或截取前60个字符
+      
+      // 从提示中生成备用项目名称
       const fallbackProjectName = summarizeProjectNameFromPrompt(prompt);
-      // If this is the first turn, derive a working title from the prompt
-      // so the conversation is identifiable in the dropdown without a
-      // round-trip through the agent.
+      
+      // 如果是第一个轮次，从提示中派生一个工作标题，使对话在下拉菜单中可识别，无需等待代理往返
       if (isFirstTurn) {
-        const title = fallbackFirstTurnTitle;
+        const title = fallbackFirstTurnTitle; // 使用备用标题
         if (title) {
+          // 更新会话列表中的标题
           setConversations((curr) =>
             curr.map((c) =>
-              c.id === runConversationId ? { ...c, title } : c,
+              c.id === runConversationId ? { ...c, title } : c, // 匹配当前会话ID则更新标题
             ),
           );
+          // 异步持久化会话标题到后端
           void patchConversation(project.id, runConversationId, { title });
         }
-        const projectName = fallbackProjectName;
+        
+        const projectName = fallbackProjectName; // 使用备用项目名称
+        // 如果项目名称存在、与当前项目名称不同，且允许从提示自动重命名项目
         if (
           projectName &&
           projectName !== project.name &&
           canAutoRenameProjectFromPrompt(project, prompt)
         ) {
+          // 构建项目元数据，标记名称来源为'prompt'
           const metadata = project.metadata
-            ? { ...project.metadata, nameSource: 'prompt' as const }
+            ? { ...project.metadata, nameSource: 'prompt' as const } // 保留原有元数据，添加名称来源标记
             : undefined;
+          
+          // 创建更新后的项目对象
           const updated: Project = {
             ...project,
-            name: projectName,
-            ...(metadata ? { metadata } : {}),
-            updatedAt: Date.now(),
+            name: projectName, // 更新项目名称
+            ...(metadata ? { metadata } : {}), // 如果有元数据则添加
+            updatedAt: Date.now(), // 更新时间为当前时间戳
           };
+          
+          // 通知项目变更
           onProjectChange(updated);
+          
+          // 异步持久化项目名称到后端
           void patchProject(project.id, {
             name: projectName,
             ...(metadata ? { metadata } : {}),
           });
         }
       }
+      
+      // 定义判断是否可替换对话标题的函数
       const canReplaceConversationTitle = (title: string | null | undefined) => {
-        const trimmed = (title ?? '').trim();
+        const trimmed = (title ?? '').trim(); // 去除标题首尾空格
         return (
-          !trimmed ||
-          trimmed === fallbackFirstTurnTitle ||
-          trimmed === prompt.slice(0, 60).trim()
+          !trimmed || // 标题为空
+          trimmed === fallbackFirstTurnTitle || // 标题等于备用首轮标题
+          trimmed === prompt.slice(0, 60).trim() // 标题等于提示的前60个字符
         );
       };
+      
+      // 定义应用代理生成标题的函数
       const applyAgentGeneratedTitle = (rawTitle: string) => {
-        if (!isFirstTurn) return;
-        const agentTitle = rawTitle.trim();
-        if (!agentTitle || isDesignSystemWorkspacePrompt(prompt)) return;
+        if (!isFirstTurn) return; // 仅处理首轮对话
+        
+        const agentTitle = rawTitle.trim(); // 去除代理生成标题的首尾空格
+        if (!agentTitle || isDesignSystemWorkspacePrompt(prompt)) return; // 标题为空或是设计系统工作区提示则忽略
+        
+        // 获取当前对话的标题
         const currentConversationTitle = conversationsRef.current.find(
           (conversation) => conversation.id === runConversationId,
         )?.title;
+        
+        // 判断是否需要持久化更新对话标题
         const shouldPatchConversation = canReplaceConversationTitle(currentConversationTitle);
+        
+        // 更新UI中的对话标题
         setConversations((curr) =>
           curr.map((conversation) => {
-            if (conversation.id !== runConversationId) return conversation;
-            if (!canReplaceConversationTitle(conversation.title)) return conversation;
-            return { ...conversation, title: agentTitle };
+            if (conversation.id !== runConversationId) return conversation; // 不匹配的会话保持不变
+            if (!canReplaceConversationTitle(conversation.title)) return conversation; // 不可替换的标题保持不变
+            return { ...conversation, title: agentTitle }; // 更新为代理生成的标题
           }),
         );
+        
+        // 如果需要持久化，异步更新后端对话标题
         if (shouldPatchConversation) {
           void patchConversation(project.id, runConversationId, { title: agentTitle });
         }
+        
+        // 如果代理标题与项目名称不同，且允许从提示自动重命名项目
         if (
           agentTitle !== project.name &&
           canAutoRenameProjectFromPrompt(project, prompt)
         ) {
+          // 构建项目元数据，标记名称来源为'agent'
           const metadata = project.metadata
-            ? { ...project.metadata, nameSource: 'agent' as const }
+            ? { ...project.metadata, nameSource: 'agent' as const } // 保留原有元数据，添加名称来源标记
             : undefined;
+          
+          // 创建更新后的项目对象
           const updated: Project = {
             ...project,
-            name: agentTitle,
-            ...(metadata ? { metadata } : {}),
-            updatedAt: Date.now(),
+            name: agentTitle, // 更新项目名称为代理生成的标题
+            ...(metadata ? { metadata } : {}), // 如果有元数据则添加
+            updatedAt: Date.now(), // 更新时间为当前时间戳
           };
+          
+          // 通知项目变更
           onProjectChange(updated);
+          
+          // 异步持久化项目名称到后端
           void patchProject(project.id, {
             name: agentTitle,
             ...(metadata ? { metadata } : {}),
@@ -3683,109 +3805,127 @@ export function ProjectView({
         }
       };
 
-      // Snapshot the file list at turn-start so we can diff after the
-      // agent finishes and surface anything new (e.g. a generated .pptx)
-      // as download chips on the assistant message.
+      // 在轮次开始时拍摄文件列表快照，以便在代理完成后进行差异比较，
+      // 将新生成的文件（如.pptx）作为助手消息上的下载芯片展示
       const beforeFileNames = new Set(preTurnFileNames);
 
+      // 创建工件解析器，用于从流式文本中提取HTML工件
       const parser = createArtifactParser();
+      
+      // 初始化解析后的工件对象
       let parsedArtifact: Artifact | null = null;
+      
+      // 初始化实时HTML内容缓冲区
       let liveHtml = '';
+      
+      // 初始化流式文本累积器
       let streamedText = '';
 
+      // 定义更新助手消息的辅助函数，接受一个更新函数并应用到消息列表中的助手消息
       const updateAssistant = (updater: (prev: ChatMessage) => ChatMessage) => {
         setMessages((curr) =>
           curr.map((m) => {
-            if (m.id !== assistantId) return m;
-            const updated = updater(m);
-            latestAssistantMsg = updated;
-            return updated;
+            if (m.id !== assistantId) return m; // 非助手消息保持不变
+            const updated = updater(m); // 应用更新函数
+            latestAssistantMsg = updated; // 更新最新的助手消息引用
+            return updated; // 返回更新后的消息
           }),
         );
       };
+      
+      // 持久化定时器，用于延迟保存助手消息
       let persistTimer: ReturnType<typeof setTimeout> | null = null;
+      
+      // 定义延迟持久化助手消息的函数，使用500ms防抖
       const persistAssistantSoon = () => {
-        if (persistTimer) return;
+        if (persistTimer) return; // 如果已有定时器在运行，直接返回
         persistTimer = scheduleProjectTimeout(() => {
-          persistTimer = null;
-          persistMessageById(assistantId);
+          persistTimer = null; // 清除定时器引用
+          persistMessageById(assistantId); // 按ID持久化助手消息
         }, 500);
       };
+      
+      // 定义立即持久化助手消息的函数（保持连接活跃）
       const persistAssistantNowKeepalive = () => {
         if (persistTimer) {
-          clearProjectTimeout(persistTimer);
-          persistTimer = null;
+          clearProjectTimeout(persistTimer); // 清除延迟定时器
+          persistTimer = null; // 清除定时器引用
         }
-        persistMessageById(assistantId, { keepalive: true });
+        persistMessageById(assistantId, { keepalive: true }); // 立即持久化并保持连接
       };
+      
+      // 定义推送事件的函数，将代理事件添加到助手消息的事件列表中
       const pushEvent = (ev: AgentEvent) => {
-        textBuffer.flush();
-        updateAssistant((prev) => ({ ...prev, events: [...(prev.events ?? []), ev] }));
+        textBuffer.flush(); // 刷新文本缓冲区，确保事件顺序正确
+        updateAssistant((prev) => ({ ...prev, events: [...(prev.events ?? []), ev] })); // 追加事件到消息
+        
+        // 处理实时工件事件：当收到live_artifact事件时
         if (ev.kind === 'live_artifact') {
-          setLiveArtifactEvents((prev) => appendLiveArtifactEventItem(prev, ev));
+          setLiveArtifactEvents((prev) => appendLiveArtifactEventItem(prev, ev)); // 追加实时工件事件
           void refreshLiveArtifacts().then(() => {
-            if (ev.action !== 'deleted') requestOpenFile(liveArtifactTabId(ev.artifactId));
+            if (ev.action !== 'deleted') requestOpenFile(liveArtifactTabId(ev.artifactId)); // 非删除操作则打开工件文件
           });
-          onProjectsRefresh();
+          onProjectsRefresh(); // 刷新项目列表
           return;
         }
+        
+        // 处理实时工件刷新事件
         if (ev.kind === 'live_artifact_refresh') {
-          setLiveArtifactEvents((prev) => appendLiveArtifactEventItem(prev, ev));
-          void refreshLiveArtifacts();
-          onProjectsRefresh();
+          setLiveArtifactEvents((prev) => appendLiveArtifactEventItem(prev, ev)); // 追加刷新事件
+          void refreshLiveArtifacts(); // 异步刷新实时工件
+          onProjectsRefresh(); // 刷新项目列表
           return;
         }
-        persistAssistantSoon();
-        persistAssistantSoon();
-        // Track Write tool invocations so we can auto-open the destination
-        // file the moment the agent finishes writing it. The file-creating
-        // tools we care about: Write (new file), Edit (existing file —
-        // surfacing the freshly-modified file is also useful).
+        
+        persistAssistantSoon(); // 延迟持久化助手消息
+        persistAssistantSoon(); // 第二次调用确保定时器被设置（可能是冗余的防护）
+        
+        // 跟踪Write工具调用，以便在代理完成写入文件时自动打开目标文件。
+        // 我们关心的文件创建工具：Write（新文件）、Edit（现有文件——展示刚修改的文件也很有用）
         if (ev.kind === 'tool_use') {
-          // The authoritative input has landed; drop the live partial so the
-          // card renders from the parsed `tool_use.input` instead of the
-          // mid-token JSON fragment.
+          // 权威输入已到达；丢弃实时部分输入，使卡片从解析后的tool_use.input渲染，
+          // 而不是从令牌中间的JSON片段渲染
           setLiveToolInput((prev) => {
-            if (!(ev.id in prev)) return prev;
+            if (!(ev.id in prev)) return prev; // 如果ID不在实时输入中，直接返回
             const next = { ...prev };
-            delete next[ev.id];
+            delete next[ev.id]; // 删除对应的实时输入项
             return next;
           });
         }
+        
+        // 处理Write和Edit工具调用，记录文件路径以便后续自动打开
         if (ev.kind === 'tool_use' && ((ev.name === 'Write' || ev.name === 'write') || ev.name === 'Edit')) {
           const input = ev.input as { file_path?: unknown; filePath?: unknown } | null;
-          const filePath = input?.file_path ?? input?.filePath;
+          const filePath = input?.file_path ?? input?.filePath; // 获取文件路径（兼容不同字段名）
           if (typeof filePath === 'string' && filePath.length > 0) {
-            // Preserve the full path so decideAutoOpenAfterWrite can do a
-            // path-suffix match against the project's relative file paths.
-            // Reducing to a basename here would lose the segment alignment
-            // we need to disambiguate same-basename collisions across the
-            // project tree and outside it.
-            pendingWritesRef.current.set(ev.id, filePath);
+            // 保留完整路径，以便decideAutoOpenAfterWrite可以针对项目的相对文件路径进行路径后缀匹配。
+            // 在此处缩减为基本名称会丢失我们在项目树内及外部消除同名冲突所需的段对齐信息
+            pendingWritesRef.current.set(ev.id, filePath); // 记录工具调用ID与文件路径的映射
           }
         }
+        
+        // 处理工具结果事件：当工具执行完成时
         if (ev.kind === 'tool_result') {
-          const filePath = pendingWritesRef.current.get(ev.toolUseId);
+          const filePath = pendingWritesRef.current.get(ev.toolUseId); // 获取对应的文件路径
           if (filePath) {
-            pendingWritesRef.current.delete(ev.toolUseId);
-            if (!ev.isError) {
-              // Refresh first so FileWorkspace's file list (and the tab
-              // body) sees the new content before we ask it to focus.
-              // Only auto-open if the file actually landed in the project's
-              // file list — otherwise an out-of-project Write (e.g. an
-              // upstream repo edit) would spawn a permanent placeholder tab.
+            pendingWritesRef.current.delete(ev.toolUseId); // 删除已处理的映射
+            if (!ev.isError) { // 仅处理成功的工具调用
+              // 先刷新文件列表，以便FileWorkspace的文件列表（和标签体）在请求聚焦前看到新内容。
+              // 仅当文件确实落在项目的文件列表中时才自动打开——
+              // 否则项目外的Write（例如上游仓库编辑）将生成一个永久占位标签
               void refreshProjectFiles().then(async (nextFiles) => {
-                // A .jsx/.tsx loaded by a sibling HTML entry is a module of a
-                // multi-file React prototype, not a standalone page — don't
-                // strand the user on a dead-end preview tab. Issue #2744.
+                // .jsx/.tsx文件由同级HTML入口加载时是多文件React原型的模块，不是独立页面——
+                // 不要让用户停留在无用的预览标签上。Issue #2744
                 const moduleFileNames = /\.(jsx|tsx)$/i.test(filePath)
-                  ? await collectReferencedJsxNames(nextFiles, readProjectHtml)
+                  ? await collectReferencedJsxNames(nextFiles, readProjectHtml) // 收集引用的JSX名称
                   : undefined;
+                
+                // 决定是否在写入后自动打开文件
                 const decision = decideAutoOpenAfterWrite(filePath, nextFiles, {
                   moduleFileNames,
                 });
                 if (decision.shouldOpen && decision.fileName) {
-                  requestOpenFile(decision.fileName);
+                  requestOpenFile(decision.fileName); // 请求打开文件
                 }
               });
             }
@@ -3793,111 +3933,127 @@ export function ProjectView({
         }
       };
 
+      // 定义应用内容增量的函数，处理流式文本中的工件标记
       const applyContentDelta = (delta: string) => {
-        for (const ev of parser.feed(delta)) {
-          if (ev.type === 'artifact:start') {
-            liveHtml = '';
+        for (const ev of parser.feed(delta)) { // 遍历解析器从增量中提取的事件
+          if (ev.type === 'artifact:start') { // 工件开始标记
+            liveHtml = ''; // 重置实时HTML缓冲区
             parsedArtifact = {
-              identifier: ev.identifier,
-              artifactType: ev.artifactType,
-              title: ev.title,
-              html: '',
+              identifier: ev.identifier, // 工件标识符
+              artifactType: ev.artifactType, // 工件类型
+              title: ev.title, // 工件标题
+              html: '', // 初始HTML为空
             };
-            setArtifact(parsedArtifact);
-          } else if (ev.type === 'artifact:chunk') {
-            liveHtml += ev.delta;
+            setArtifact(parsedArtifact); // 设置工件状态
+          } else if (ev.type === 'artifact:chunk') { // 工件内容块
+            liveHtml += ev.delta; // 追加HTML增量到缓冲区
             parsedArtifact = parsedArtifact
-              ? { ...parsedArtifact, html: liveHtml }
+              ? { ...parsedArtifact, html: liveHtml } // 更新现有工件的HTML
               : {
                   identifier: ev.identifier,
                   title: '',
                   html: liveHtml,
-                };
+                }; // 创建新工件对象
             setArtifact((prev) =>
               prev
-                ? { ...prev, html: liveHtml }
+                ? { ...prev, html: liveHtml } // 更新现有工件
                 : {
                     identifier: ev.identifier,
                     title: '',
                     html: liveHtml,
-                  },
+                  }, // 创建新工件
             );
-          } else if (ev.type === 'artifact:end') {
+          } else if (ev.type === 'artifact:end') { // 工件结束标记
             parsedArtifact = parsedArtifact
-              ? { ...parsedArtifact, html: ev.fullContent }
+              ? { ...parsedArtifact, html: ev.fullContent } // 使用完整内容更新工件
               : {
                   identifier: ev.identifier,
                   title: '',
                   html: ev.fullContent,
-                };
-            setArtifact((prev) => (prev ? { ...prev, html: ev.fullContent } : null));
+                }; // 创建包含完整内容的工件
+            setArtifact((prev) => (prev ? { ...prev, html: ev.fullContent } : null)); // 更新或清除工件状态
           }
         }
       };
 
+      // 创建缓冲文本更新器，用于管理流式文本的缓冲和持久化
       const textBuffer = createBufferedTextUpdates({
-        updateMessage: updateAssistant,
-        persistSoon: persistAssistantSoon,
-        flushAndPersistNow: persistAssistantNowKeepalive,
-        onContentDelta: applyContentDelta,
+        updateMessage: updateAssistant, // 更新助手消息的回调
+        persistSoon: persistAssistantSoon, // 延迟持久化回调
+        flushAndPersistNow: persistAssistantNowKeepalive, // 立即刷新并持久化回调
+        onContentDelta: applyContentDelta, // 内容增量处理回调
       });
+      
+      // 将文本缓冲器引用保存到ref中，供其他地方使用
       sendTextBufferRef.current = textBuffer;
 
+      // 创建中止控制器，用于取消正在进行的请求
       const controller = new AbortController();
+      
+      // 创建取消控制器，用于处理用户取消操作
       const cancelController = new AbortController();
+      
+      // 保存中止和取消控制器的引用
       abortRef.current = controller;
       cancelRef.current = cancelController;
+      
+      // 定义事件处理器集合
       const handlers = {
+        // 处理文本增量：当收到新的文本片段时
         onDelta: (delta: string) => {
-          streamedText += delta;
-          textBuffer.appendContent(delta);
+          streamedText += delta; // 累积流式文本
+          textBuffer.appendContent(delta); // 将增量追加到文本缓冲区
         },
+        
+        // 处理代理事件：当收到代理生成的事件时
         onAgentEvent: (ev: AgentEvent) => {
-          if (ev.kind === 'conversation_title') {
-            applyAgentGeneratedTitle(ev.title);
+          if (ev.kind === 'conversation_title') { // 对话标题事件
+            applyAgentGeneratedTitle(ev.title); // 应用代理生成的标题
             return;
           }
-          if (ev.kind === 'text') textBuffer.appendTextEvent(ev.text);
-          else pushEvent(ev);
+          if (ev.kind === 'text') textBuffer.appendTextEvent(ev.text); // 文本事件追加到缓冲区
+          else pushEvent(ev); // 其他事件推送到事件列表
         },
+        
+        // 处理工具输入增量：当工具调用的参数以流式方式到达时
         onToolInputDelta: (id: string, name: string, delta: string) => {
           setLiveToolInput((prev) => ({
             ...prev,
             [id]: {
-              name,
-              text: (prev[id]?.text ?? '') + delta,
-              // Pin the tool's stream position the first time we see it: the
-              // count of events already on the message is everything the model
-              // emitted before the tool call (its preamble). Buffered text
-              // (appendTextEvent) isn't flushed into `events` until the next
-              // frame, so add 1 for any still-pending preamble chunk — it will
-              // commit as one text event just before this tool's position.
+              name, // 工具名称
+              text: (prev[id]?.text ?? '') + delta, // 累积工具输入文本
+              // 在首次见到工具时固定其流位置：消息上已有的事件计数是模型在工具调用前发出的所有内容（前导）。
+              // 缓冲文本（appendTextEvent）直到下一帧才会刷新到events中，
+              // 因此为任何仍在等待的前导块加1——它将在工具位置之前作为一个文本事件提交
               seq:
                 prev[id]?.seq ??
                 ((latestAssistantMsg.events?.length ?? 0) + (textBuffer.hasPendingText() ? 1 : 0)),
             },
           }));
         },
+        
+        // 处理完成事件：当代理完成消息生成时
         onDone: (fullText = '') => {
-          // The daemon delivers onDone even for a canceled run, so a run
-          // superseded by a "send now" interrupt can still land here and must
-          // not apply its completion side effects over the replacement. A run
-          // may finalize unless it was tagged superseded at interrupt time
-          // (recorded before handleStop cleared the refs), which is reliable
-          // even before the replacement send attaches — unlike abortRef, whose
-          // terminal onRunStatus / handleStop churn make it ambiguous here.
+          // 守护进程即使对于已取消的运行也会传递onDone，因此被"立即发送"中断取代的运行
+          // 仍可能到达此处，且绝不能将其完成副作用应用于替代运行之上。
+          // 运行可以最终化，除非它在中断时被标记为已取代（在handleStop清除引用之前记录），
+          // 这即使在替代发送附加之前也是可靠的——不像abortRef，
+          // 其最终的onRunStatus/handleStop搅动使其在此处模糊不清
           const runMayFinalize =
-            !supersededRunsRef.current.has(controller);
+            !supersededRunsRef.current.has(controller); // 检查运行是否未被取代
           if (!runMayFinalize) {
-            textBuffer.cancel();
-            cancelSendTextBuffer();
+            textBuffer.cancel(); // 取消文本缓冲区
+            cancelSendTextBuffer(); // 取消发送文本缓冲区
             return;
           }
-          textBuffer.flush();
-          textBuffer.cancel();
-          cancelSendTextBuffer();
+          
+          textBuffer.flush(); // 刷新文本缓冲区
+          textBuffer.cancel(); // 取消文本缓冲区
+          cancelSendTextBuffer(); // 取消发送文本缓冲区
+          
+          // 刷新解析器中剩余的内容
           for (const ev of parser.flush()) {
-            if (ev.type === 'artifact:end') {
+            if (ev.type === 'artifact:end') { // 处理剩余的工件结束事件
               parsedArtifact = parsedArtifact
                 ? { ...parsedArtifact, html: ev.fullContent }
                 : {
@@ -3908,73 +4064,86 @@ export function ProjectView({
               setArtifact((prev) => (prev ? { ...prev, html: ev.fullContent } : null));
             }
           }
+          
+          // 检查是否为空的API响应：API模式下，无完整文本、无流式文本且无实时HTML
           const emptyApiResponse =
             config.mode === 'api' &&
             !fullText.trim() &&
             !streamedText.trim() &&
             !liveHtml.trim();
-          if (emptyApiResponse) {
+          
+          if (emptyApiResponse) { // 处理空响应情况
             const endedAt = Date.now();
-            const diagnostic = t('assistant.emptyResponseMessage');
+            const diagnostic = t('assistant.emptyResponseMessage'); // 获取空响应诊断消息
             updateMessageById(
               assistantId,
               (prev) => ({
                 ...prev,
-                endedAt,
-                runStatus: 'failed',
+                endedAt, // 设置结束时间
+                runStatus: 'failed', // 标记为失败状态
                 events: [
                   ...(prev.events ?? []),
-                  { kind: 'status', label: 'empty_response', detail: config.model },
-                  { kind: 'text', text: diagnostic },
+                  { kind: 'status', label: 'empty_response', detail: config.model }, // 添加空响应状态事件
+                  { kind: 'text', text: diagnostic }, // 添加诊断文本事件
                 ],
               }),
               true,
-              { telemetryFinalized: true },
+              { telemetryFinalized: true }, // 标记遥测已最终化
             );
+            
             if (runCommentAttachments.length > 0) {
-              void patchAttachedStatuses(runCommentAttachments, 'failed');
+              void patchAttachedStatuses(runCommentAttachments, 'failed'); // 标记评论附件为失败
             }
+            
+            // 清除当前运行的流标记，检查是否拥有当前运行
             const ownsCurrentRun = clearCurrentRunStreamingMarker(
               runConversationId,
               controller,
               cancelController,
             );
-            if (ownsCurrentRun) updateConversationLatestRun('failed', endedAt);
-            void refreshProjectFiles();
-            onProjectsRefresh();
+            if (ownsCurrentRun) updateConversationLatestRun('failed', endedAt); // 更新会话运行状态为失败
+            
+            void refreshProjectFiles(); // 刷新项目文件
+            onProjectsRefresh(); // 刷新项目
             return;
           }
-          const endedAt = Date.now();
-          let finalRunStatus: ChatMessage['runStatus'] = 'succeeded';
+          
+          const endedAt = Date.now(); // 记录结束时间
+          let finalRunStatus: ChatMessage['runStatus'] = 'succeeded'; // 默认运行状态为成功
+          
+          // 更新助手消息，设置结束时间和运行状态
           updateAssistant((prev) => {
-            finalRunStatus = resolveSucceededRunStatus(prev.runStatus);
+            finalRunStatus = resolveSucceededRunStatus(prev.runStatus); // 解析最终运行状态
             return {
               ...prev,
-              endedAt,
-              runStatus: finalRunStatus,
+              endedAt, // 设置结束时间
+              runStatus: finalRunStatus, // 设置运行状态
             };
           });
+          
           if (runCommentAttachments.length > 0) {
-            void patchAttachedStatuses(runCommentAttachments, 'needs_review');
+            void patchAttachedStatuses(runCommentAttachments, 'needs_review'); // 标记评论附件需要审查
           }
+          
+          // 清除当前运行的流标记
           const ownsCurrentRun = clearCurrentRunStreamingMarker(
             runConversationId,
             controller,
             cancelController,
           );
-          if (ownsCurrentRun) updateConversationLatestRun(finalRunStatus ?? 'succeeded', endedAt);
-          // Refetch the file list directly (rather than just bumping the
-          // refresh signal) so we can diff against the pre-turn snapshot
-          // and attach the new files to the assistant message as download
-          // chips.
+          if (ownsCurrentRun) updateConversationLatestRun(finalRunStatus ?? 'succeeded', endedAt); // 更新会话运行状态
+          
+          // 直接重新获取文件列表（而不仅仅是触发刷新信号），以便与轮次前的快照进行差异比较，
+          // 并将新文件作为下载芯片附加到助手消息上
           void (async () => {
-            let nextFiles = await refreshProjectFiles();
-            const finalText = streamedText || fullText;
+            let nextFiles = await refreshProjectFiles(); // 刷新项目文件列表
+            const finalText = streamedText || fullText; // 获取最终文本内容
             const artifactToPersist = parsedArtifact?.html
               ? parsedArtifact
-              : artifactFromStandaloneHtml(finalText);
-            if (artifactToPersist?.html) {
-              const producedBeforeFallback = computeProducedFiles(beforeFileNames, nextFiles) ?? [];
+              : artifactFromStandaloneHtml(finalText); // 确定要持久化的工件
+            
+            if (artifactToPersist?.html) { // 如果有工件HTML需要持久化
+              const producedBeforeFallback = computeProducedFiles(beforeFileNames, nextFiles) ?? []; // 计算已生成的文件
               const sameTurnHtmlWrite = await findSameTurnHtmlWriteForRecoveredArtifact({
                 artifactHtml: resolvePersistedArtifactHtml({
                   artifactHtml: artifactToPersist.html,
@@ -3983,130 +4152,156 @@ export function ProjectView({
                 }),
                 producedFiles: producedBeforeFallback,
                 readProjectHtml,
+<<<<<<< Updated upstream
+=======
+                allowAnyHtmlWrite: assistantAgentId === 'claude', // Claude代理允许任何HTML写入
+>>>>>>> Stashed changes
               });
-              if (sameTurnHtmlWrite) {
-                savedArtifactRef.current = sameTurnHtmlWrite.name;
-                requestOpenFile(sameTurnHtmlWrite.name);
+              
+              if (sameTurnHtmlWrite) { // 如果在同一轮次有HTML写入
+                savedArtifactRef.current = sameTurnHtmlWrite.name; // 保存工件引用
+                requestOpenFile(sameTurnHtmlWrite.name); // 请求打开文件
               } else {
-                await persistArtifact(artifactToPersist, nextFiles, finalText);
-                nextFiles = await refreshProjectFiles();
+                await persistArtifact(artifactToPersist, nextFiles, finalText); // 持久化工件
+                nextFiles = await refreshProjectFiles(); // 重新刷新文件列表
               }
             }
-            const produced = computeProducedFiles(beforeFileNames, nextFiles) ?? [];
-            const producedHtmlToOpen = selectAutoOpenProducedHtml(produced);
-            if (producedHtmlToOpen) requestOpenFile(producedHtmlToOpen);
+            
+            const produced = computeProducedFiles(beforeFileNames, nextFiles) ?? []; // 计算生成的文件
+            const producedHtmlToOpen = selectAutoOpenProducedHtml(produced); // 选择要自动打开的HTML文件
+            if (producedHtmlToOpen) requestOpenFile(producedHtmlToOpen); // 请求打开HTML文件
+            
+            // 更新消息列表，附加生成的文件信息
             setMessages((curr) => {
               const updated = curr.map((m) =>
                 m.id === assistantId
-                  ? { ...m, producedFiles: produced }
+                  ? { ...m, producedFiles: produced } // 为助手消息添加生成的文件列表
                   : m,
               );
-              const finalized = updated.find((m) => m.id === assistantId);
-              if (finalized) persistMessage(finalized, { telemetryFinalized: true });
+              const finalized = updated.find((m) => m.id === assistantId); // 查找最终的助手消息
+              if (finalized) persistMessage(finalized, { telemetryFinalized: true }); // 持久化最终消息并标记遥测完成
               return updated;
             });
-            await auditDesignSystemWorkspaceAfterRun(assistantId);
+            
+            await auditDesignSystemWorkspaceAfterRun(assistantId); // 审计设计系统工作区
           })();
-          onProjectsRefresh();
+          
+          onProjectsRefresh(); // 刷新项目
         },
+        
+        // 处理错误事件：当消息生成过程中发生错误时
         onError: (err: Error) => {
-          const endedAt = Date.now();
-          const errorCode = (err as Error & { code?: string }).code;
-          const resumable = (err as Error & { resumable?: boolean }).resumable === true;
-          // A run superseded by a "send now" interrupt can still surface a
-          // late disconnect error (e.g. a canceled stream that lost its
-          // terminal SSE). It must not paint a global failure banner or
-          // re-finalize its already-canceled assistant message once it was
-          // tagged superseded. See the onDone above for the ownership rationale.
+          const endedAt = Date.now(); // 记录错误发生时间
+          const errorCode = (err as Error & { code?: string }).code; // 获取错误代码
+          const resumable = (err as Error & { resumable?: boolean }).resumable === true; // 检查是否可恢复
+          
+          // 被"立即发送"中断取代的运行仍可能引发晚期断开错误（例如已取消的流失去了其终端SSE）。
+          // 一旦被标记为已取代，它绝不能绘制全局失败横幅或重新最终化其已取消的助手消息。
+          // 有关所有权原理，请参见上面的onDone
           const runMayFinalize =
-            !supersededRunsRef.current.has(controller);
-          textBuffer.flush();
-          textBuffer.cancel();
-          cancelSendTextBuffer();
-          if (runMayFinalize) {
-            setError(err.message);
-            appendAssistantErrorEvent(assistantId, err.message, errorCode);
+            !supersededRunsRef.current.has(controller); // 检查运行是否未被取代
+          
+          textBuffer.flush(); // 刷新文本缓冲区
+          textBuffer.cancel(); // 取消文本缓冲区
+          cancelSendTextBuffer(); // 取消发送文本缓冲区
+          
+          if (runMayFinalize) { // 如果运行可以最终化
+            setError(err.message); // 设置错误消息
+            appendAssistantErrorEvent(assistantId, err.message, errorCode); // 追加错误事件到助手消息
             updateAssistant((prev) => ({
               ...prev,
-              endedAt,
+              endedAt, // 设置结束时间
               runStatus: config.mode === 'api' || prev.runId || isActiveRunStatus(prev.runStatus)
-                ? 'failed'
-                : prev.runStatus,
-              resumable,
+                ? 'failed' // API模式、有运行ID或活跃状态时标记为失败
+                : prev.runStatus, // 否则保持原状态
+              resumable, // 设置可恢复标志
             }));
+            
             if (runCommentAttachments.length > 0) {
-              void patchAttachedStatuses(runCommentAttachments, 'failed');
+              void patchAttachedStatuses(runCommentAttachments, 'failed'); // 标记评论附件为失败
             }
           }
+          
+          // 清除当前运行的流标记
           const ownsCurrentRun = clearCurrentRunStreamingMarker(
             runConversationId,
             controller,
             cancelController,
           );
-          if (ownsCurrentRun) updateConversationLatestRun('failed', endedAt);
+          if (ownsCurrentRun) updateConversationLatestRun('failed', endedAt); // 更新会话运行状态为失败
+          
+          // 更新消息列表并持久化
           setMessages((curr) => {
-            const finalized = curr.find((m) => m.id === assistantId);
-            if (finalized) persistMessage(finalized, { telemetryFinalized: true });
+            const finalized = curr.find((m) => m.id === assistantId); // 查找最终的助手消息
+            if (finalized) persistMessage(finalized, { telemetryFinalized: true }); // 持久化最终消息
             return curr;
           });
-          void refreshProjectFiles();
+          
+          void refreshProjectFiles(); // 刷新项目文件
         },
       };
-
+      // 守护进程模式：通过本地代理处理消息
       if (config.mode === 'daemon') {
+        // 如果没有选择代理，抛出错误并终止
         if (!config.agentId) {
-          handlers.onError(new Error('Pick a local agent first (top bar).'));
-          return true;
+          handlers.onError(new Error('Pick a local agent first (top bar).')); // 提示用户先在顶部栏选择本地代理
+          return true; // 返回true表示已处理（错误状态）
         }
+        
+        // 获取有效的代理模型选择配置
         const choice = effectiveSelectedAgentChoice;
-        // v2 analytics: when the active project is a DS workspace
-        // (created by `prepareCreatedDesignSystemProject`, identifiable
-        // by `metadata.importedFrom === 'design-system'`), every run
-        // started from this composer is a DS-variant run. Pass
-        // analyticsHints so the daemon emits run_created /
-        // run_finished under `page_name=design_system_project`,
-        // `area=design_system_generation`, `project_kind=design_system`.
-        // The first-ever message into a DS workspace is the auto-sent
-        // generation kickoff (entry_from=`onboarding_design_system` is
-        // the doc's name for "DS create flow handed off to the agent");
-        // subsequent messages are review-driven regenerations
-        // (`regenerate_from_review`). Use `messages.length === 0` —
-        // truer than autoSendFirstMessageRef which races StrictMode
-        // remounts + sessionStorage clears.
+        
+        // v2版本分析：当活跃项目是设计系统工作区时（由prepareCreatedDesignSystemProject创建，
+        // 通过metadata.importedFrom === 'design-system'标识），
+        // 从此编辑器启动的每次运行都是设计系统变体运行。
+        // 传递analyticsHints以便守护进程在page_name=design_system_project、
+        // area=design_system_generation、project_kind=design_system下发出run_created/run_finished事件。
+        // 进入设计系统工作区的第一条消息是自动发送的生成启动消息
+        // （entry_from='onboarding_design_system'是文档中用于"设计系统创建流程移交给代理"的名称）；
+        // 后续消息是审查驱动的重新生成（'regenerate_from_review'）。
+        // 使用messages.length === 0判断——比autoSendFirstMessageRef更可靠，
+        // 后者会与StrictMode重新挂载和sessionStorage清除产生竞态条件
         const isDesignSystemWorkspaceProject =
-          project.metadata?.importedFrom === 'design-system';
+          project.metadata?.importedFrom === 'design-system'; // 检查项目是否为设计系统工作区
+        
+        // 确定设计系统入口来源：消息列表为空则为引导流程，否则为审查重新生成
         const dsEntryFrom: 'onboarding_design_system' | 'regenerate_from_review' =
           messages.length === 0
-            ? 'onboarding_design_system'
-            : 'regenerate_from_review';
+            ? 'onboarding_design_system' // 首次生成，来源为引导设计系统
+            : 'regenerate_from_review'; // 后续生成，来源为审查重新生成
+        
+        // 构建设计系统分析提示：如果是设计系统工作区项目，则包含相关元数据
         const dsAnalyticsHints = isDesignSystemWorkspaceProject
           ? {
-              entryFrom: dsEntryFrom,
-              projectKind: 'design_system' as const,
+              entryFrom: dsEntryFrom, // 入口来源
+              projectKind: 'design_system' as const, // 项目类型为设计系统
               designSystemRunContext: {
-                origin: 'manual_create' as const,
+                origin: 'manual_create' as const, // 运行上下文：手动创建
               },
             }
-          : undefined;
-        // A caller-supplied entry_from (e.g. 'resume_continue' from the
-        // resumable-failure Continue action) overrides the DS default so the
-        // run is attributed to the affordance that started it.
+          : undefined; // 非设计系统项目则不设置分析提示
+        
+        // 调用方提供的entry_from（例如来自可恢复失败的'resume_continue'继续操作）
+        // 会覆盖设计系统默认值，以便将运行归因于启动它的操作
         //
-        // Session-dimension hints are stamped on every real run creation (this
-        // path only runs for non-queued sends): claim the next 0-based turn
-        // index for this browser session, and flag whether the project already
-        // had a generated artifact (project-scoped) so the run reads as an edit
-        // rather than a first creation.
-        const sessionTurn = claimRunTurnIndex();
+        // 会话维度提示会在每次实际运行创建时标记（此路径仅对非排队发送运行）：
+        // 为此浏览器会话声明下一个从0开始的轮次索引，
+        // 并标记项目是否已有生成的工件（项目范围），以便运行被解读为编辑而非首次创建
+        const sessionTurn = claimRunTurnIndex(); // 声明并获取当前会话的运行轮次索引
+        
+        // 检查项目是否已存在工件清单，用于判断是首次创建还是编辑
         const hasExistingArtifact = projectFilesRef.current.some(
-          (file) => Boolean(file.artifactManifest),
+          (file) => Boolean(file.artifactManifest), // 检查文件是否有工件清单
         );
+        
+        // 构建运行分析提示对象，合并设计系统提示、入口来源、会话轮次等信息
         const runAnalyticsHints = {
-          ...(dsAnalyticsHints ?? {}),
-          ...(meta?.entryFrom ? { entryFrom: meta.entryFrom } : {}),
+          ...(dsAnalyticsHints ?? {}), // 合并设计系统分析提示（如果存在）
+          ...(meta?.entryFrom ? { entryFrom: meta.entryFrom } : {}), // 如果调用方提供了入口来源，则覆盖默认值
           ...(sessionTurn
-            ? { turnIndex: sessionTurn.turnIndex, isFirstRun: sessionTurn.isFirstRun }
+            ? { turnIndex: sessionTurn.turnIndex, isFirstRun: sessionTurn.isFirstRun } // 添加轮次索引和是否首次运行的标记
             : {}),
+<<<<<<< Updated upstream
           hasExistingArtifact,
           // This branch only runs in daemon (local-execution) mode, so the
           // runtime is the bundled AMR cloud agent or a local coding CLI —
@@ -4114,136 +4309,159 @@ export function ProjectView({
           // the authoritative value so run_created/run_finished split AMR vs
           // CLI without relying on its agent-id re-derivation.
           runtimeType: config.agentId === 'amr' ? ('amr_cloud' as const) : ('local_cli' as const),
+=======
+          hasExistingArtifact, // 是否已有工件的标记
+>>>>>>> Stashed changes
         };
+        
+        // 通过守护进程流式传输消息
         void streamViaDaemon({
-          agentId: config.agentId,
-          history: nextHistory,
-          signal: controller.signal,
-          cancelSignal: cancelController.signal,
-          handlers,
-          projectId: project.id,
-          conversationId: runConversationId,
-          assistantMessageId: assistantId,
-          clientRequestId: randomUUID(),
-          skillId: project.skillId ?? null,
-          skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [],
-          context: runContext,
-          designSystemId: project.designSystemId ?? null,
-          attachments: runAttachments.map((a) => a.path),
-          commentAttachments: runCommentAttachments,
-          sessionMode: runSessionMode,
+          agentId: config.agentId, // 代理ID
+          history: nextHistory, // 对话历史
+          signal: controller.signal, // 中止信号
+          cancelSignal: cancelController.signal, // 取消信号
+          handlers, // 事件处理器
+          projectId: project.id, // 项目ID
+          conversationId: runConversationId, // 会话ID
+          assistantMessageId: assistantId, // 助手消息ID
+          clientRequestId: randomUUID(), // 客户端请求ID（随机生成）
+          skillId: project.skillId ?? null, // 技能ID（如果存在）
+          skillIds: Array.isArray(meta?.skillIds) ? meta.skillIds : [], // 技能ID列表（确保为数组）
+          context: runContext, // 运行上下文
+          designSystemId: project.designSystemId ?? null, // 设计系统ID（如果存在）
+          attachments: runAttachments.map((a) => a.path), // 附件路径列表
+          commentAttachments: runCommentAttachments, // 评论附件列表
+          sessionMode: runSessionMode, // 会话模式
           appliedPluginSnapshotId:
-            meta?.appliedPluginSnapshotId ?? meta?.appliedPluginSnapshot?.snapshotId ?? null,
-          research: meta?.research,
-          mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
-          model: choice?.model ?? null,
-          reasoning: choice?.reasoning ?? null,
-          titleGeneration: isFirstTurn ? { enabled: true } : undefined,
-          locale,
-          ...(runAnalyticsHints ? { analyticsHints: runAnalyticsHints } : {}),
+            meta?.appliedPluginSnapshotId ?? meta?.appliedPluginSnapshot?.snapshotId ?? null, // 应用插件快照ID
+          research: meta?.research, // 研究配置
+          mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata), // 媒体执行策略
+          model: choice?.model ?? null, // 选择的模型（如果存在）
+          reasoning: choice?.reasoning ?? null, // 推理配置（如果存在）
+          titleGeneration: isFirstTurn ? { enabled: true } : undefined, // 首轮对话启用标题生成
+          locale, // 语言区域设置
+          ...(runAnalyticsHints ? { analyticsHints: runAnalyticsHints } : {}), // 合并运行分析提示（如果存在）
+          
+          // 运行创建回调：当守护进程创建运行并返回runId时触发
           onRunCreated: (runId) => {
+            // 创建固定的助手消息对象，包含runId和排队状态
             const pinnedAssistant = {
-              ...latestAssistantMsg,
-              runId,
-              runStatus: 'queued' as const,
+              ...latestAssistantMsg, // 复制最新的助手消息
+              runId, // 设置运行ID
+              runStatus: 'queued' as const, // 标记状态为排队中
             };
-            latestAssistantMsg = pinnedAssistant;
-            // The view may already be on a different project/conversation;
-            // pin the daemon run to the original row so returning can reattach.
-            void saveMessage(project.id, runConversationId, pinnedAssistant);
-            updateMessageById(assistantId, (prev) => ({ ...prev, runId, runStatus: 'queued' }));
+            latestAssistantMsg = pinnedAssistant; // 更新最新的助手消息引用
+            
+            // 视图可能已经切换到不同的项目/会话；
+            // 将守护进程运行固定到原始行，以便返回时可以重新连接
+            void saveMessage(project.id, runConversationId, pinnedAssistant); // 保存消息到持久化存储
+            updateMessageById(assistantId, (prev) => ({ ...prev, runId, runStatus: 'queued' })); // 更新消息状态
           },
+          
+          // 运行状态变更回调：当守护进程报告运行状态变化时触发
           onRunStatus: (runStatus) => {
+            // 如果是终止状态，记录结束时间
             const endedAt = isTerminalRunStatus(runStatus) ? Date.now() : undefined;
+            
+            // 检查运行是否可以最终化（未被取代的运行才允许）
             const runMayFinalize =
               !supersededRunsRef.current.has(controller);
+            
+            // 更新助手消息的运行状态和结束时间
             updateMessageById(
               assistantId,
               (prev) => ({
                 ...prev,
-                runStatus,
-                endedAt: endedAt === undefined ? prev.endedAt : prev.endedAt ?? endedAt,
+                runStatus, // 设置运行状态
+                endedAt: endedAt === undefined ? prev.endedAt : prev.endedAt ?? endedAt, // 保留已有结束时间，否则使用新的
               }),
-              true,
-              runStatus === 'canceled' ? { telemetryFinalized: true } : undefined,
+              true, // 持久化更新
+              runStatus === 'canceled' ? { telemetryFinalized: true } : undefined, // 取消状态时标记遥测已最终化
             );
+            
+            // 如果运行不可最终化，直接返回
             if (!runMayFinalize) return;
+            
+            // 更新会话的最新运行状态
             updateConversationLatestRun(runStatus, endedAt);
+            
+            // 如果是终止运行状态，清除流标记并安排消息刷新
             if (isTerminalRunStatus(runStatus)) {
-              clearCurrentRunStreamingMarker(runConversationId, controller, cancelController);
-              scheduleConversationMessageRefresh(runConversationId);
+              clearCurrentRunStreamingMarker(runConversationId, controller, cancelController); // 清除当前运行的流标记
+              scheduleConversationMessageRefresh(runConversationId); // 安排会话消息刷新
             }
           },
+          
+          // 运行事件ID回调：当收到最后一个运行事件ID时触发
           onRunEventId: (lastRunEventId) => {
-            updateMessageById(assistantId, (prev) => ({ ...prev, lastRunEventId }));
-            persistAssistantSoon();
+            updateMessageById(assistantId, (prev) => ({ ...prev, lastRunEventId })); // 更新助手消息的最后事件ID
+            persistAssistantSoon(); // 延迟持久化助手消息
           },
         });
-        return true;
+        return true; // 返回true表示已处理守护进程模式
       } else {
-        // Mirror the daemon chat-route memory hook for BYOK chats. The
-        // CLI path runs `extractFromMessage` BEFORE composing the prompt
-        // (so an explicit "remember: X" / "我是 X" marker in this turn's
-        // user message lands in memory in time for this turn's system
-        // prompt), then queues `extractWithLLM` on child close (so the
-        // small-model pass picks up implicit facts from the full
-        // user+assistant exchange). BYOK chats never hit that route, so
-        // we replicate both phases here against `/api/memory/extract`.
-        // Without this, the Memory tab / model picker is a no-op for
-        // BYOK users even though the UI saves model + index + entries
-        // for that mode.
-        const userText = (userMsg.content ?? '').trim();
-        // Snapshot the live BYOK chat config so the daemon can run
-        // "Same as chat" memory extraction against the same vendor /
-        // key / baseUrl / apiVersion the user is chatting with. The
-        // daemon never persists BYOK creds itself, so this per-call
-        // signal is the only way `pickProvider()` can avoid falling
-        // through to env / media-config (which is wrong for BYOK)
-        // when no explicit memory model override is set. The picker
-        // re-syncs an *explicit* override when chat config drifts;
-        // this snapshot covers the implicit "Same as chat" default.
+        // 为非守护进程（BYOK自带密钥）聊天镜像守护进程的聊天路由内存钩子。
+        // CLI路径在编写提示之前运行extractFromMessage（因此本轮用户消息中的显式"remember: X"/"我是X"标记
+        // 能及时进入本轮系统提示的内存），然后在子进程关闭时排队extractWithLLM
+        // （以便小模型从完整的用户+助手交换中提取隐含事实）。
+        // BYOK聊天永远不会触发该路径，因此我们在这里针对/api/memory/extract复制两个阶段。
+        // 没有这个，即使UI为该模式保存了模型+索引+条目，Memory标签页/模型选择器对BYOK用户也是无效的
+        const userText = (userMsg.content ?? '').trim(); // 获取用户消息文本并去除首尾空格
+        
+        // 快照当前的BYOK聊天配置，以便守护进程可以针对用户正在聊天的相同供应商/密钥/baseUrl/apiVersion
+        // 运行"与聊天相同"的内存提取。守护进程本身从不持久化BYOK凭证，因此此每次调用的信号是
+        // pickProvider()在没有设置显式内存模型覆盖时避免回退到环境/媒体配置（这对BYOK来说是错误的）的唯一方式。
+        // 当聊天配置变化时，选择器会重新同步显式覆盖；此快照覆盖隐式的"与聊天相同"默认值
         const byokChatProvider =
-          config.apiProtocol && config.apiKey
+          config.apiProtocol && config.apiKey // 如果配置了API协议和密钥
             ? {
-                provider: config.apiProtocol,
-                apiKey: config.apiKey,
-                baseUrl: config.baseUrl,
+                provider: config.apiProtocol, // API协议类型
+                apiKey: config.apiKey, // API密钥
+                baseUrl: config.baseUrl, // 基础URL
                 apiVersion:
                   config.apiProtocol === 'azure'
-                    ? config.apiVersion ?? ''
-                    : '',
+                    ? config.apiVersion ?? '' // Azure协议需要API版本
+                    : '', // 其他协议不需要
               }
-            : undefined;
+            : undefined; // 未配置则返回undefined
+        
+        // 如果用户消息不为空，在对话开始前提取记忆
         if (userText.length > 0) {
           try {
             await fetch('/api/memory/extract', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: 'POST', // HTTP POST请求
+              headers: { 'Content-Type': 'application/json' }, // 设置内容类型为JSON
               body: JSON.stringify({
-                userMessage: userText,
-                projectId: project.id,
-                conversationId: runConversationId,
-                chatProvider: byokChatProvider,
+                userMessage: userText, // 用户消息文本
+                projectId: project.id, // 项目ID
+                conversationId: runConversationId, // 会话ID
+                chatProvider: byokChatProvider, // 聊天提供者配置
               }),
             });
           } catch {
-            // Best-effort: memory extraction must never block the
-            // chat. The daemon's SSE bus will catch up the Memory tab
-            // on the next event.
+            // 尽力而为：内存提取绝不应阻塞聊天。
+            // 守护进程的SSE总线将在下一个事件时赶上Memory标签页
           }
         }
+        
+        // 获取组合后的系统提示词
         const systemPrompt = await composedSystemPrompt(runSessionMode);
+        
+        // 构建包含附件上下文的API历史消息列表
         const apiHistory = await historyWithApiAttachmentContext(
           historyWithCommentAttachmentContext(
-            historyWithWorkspaceContext(nextHistory, userMsg.id, runContext),
-            userMsg.id,
+            historyWithWorkspaceContext(nextHistory, userMsg.id, runContext), // 添加工区上下文
+            userMsg.id, // 用户消息ID
           ),
-          userMsg.id,
-          project.id,
-          projectFiles,
-          { omitNativeImageAttachments: usesAnthropicProxy(config) },
+          userMsg.id, // 用户消息ID
+          project.id, // 项目ID
+          projectFiles, // 项目文件列表
+          { omitNativeImageAttachments: usesAnthropicProxy(config) }, // 使用Anthropic代理时省略原生图片附件
         );
+        
+        // 推送请求状态事件，显示正在请求的模型
         pushEvent({ kind: 'status', label: 'requesting', detail: config.model });
+<<<<<<< Updated upstream
         // BYOK runs stream client-side and never reach the daemon, so the
         // daemon's authoritative run_created/run_finished are never emitted for
         // them. Emit them here so BYOK runs are counted in the run funnel; the
@@ -4283,13 +4501,24 @@ export function ProjectView({
             }),
           );
         };
+=======
+        
+        // 初始化累积的助手文本
+        let accumulatedAssistantText = '';
+        
+        // 通过流式传输发送消息
+>>>>>>> Stashed changes
         void streamMessage(config, systemPrompt, apiHistory, controller.signal, {
+          // 文本增量回调
           onDelta: (delta) => {
-            accumulatedAssistantText += delta;
-            handlers.onDelta(delta);
-            handlers.onAgentEvent({ kind: 'text', text: delta });
+            accumulatedAssistantText += delta; // 累积助手文本
+            handlers.onDelta(delta); // 调用通用增量处理器
+            handlers.onAgentEvent({ kind: 'text', text: delta }); // 触发文本事件
           },
+          
+          // 完成回调
           onDone: () => {
+<<<<<<< Updated upstream
             handlers.onDone();
             // Count artifacts produced this turn from the project file diff,
             // mirroring the daemon's run_finished artifact_count. The
@@ -4310,84 +4539,96 @@ export function ProjectView({
             })();
             const assistantText = accumulatedAssistantText.trim();
             if (userText.length === 0 || assistantText.length === 0) return;
+=======
+            handlers.onDone(); // 调用通用完成处理器
+            
+            const assistantText = accumulatedAssistantText.trim(); // 获取累积的助手文本
+            if (userText.length === 0 || assistantText.length === 0) return; // 用户或助手文本为空则不提取记忆
+            
+            // 对话完成后提取记忆（用户+助手完整交换）
+>>>>>>> Stashed changes
             void fetch('/api/memory/extract', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: 'POST', // HTTP POST请求
+              headers: { 'Content-Type': 'application/json' }, // 设置内容类型为JSON
               body: JSON.stringify({
-                userMessage: userText,
-                assistantMessage: accumulatedAssistantText,
-                projectId: project.id,
-                conversationId: runConversationId,
-                chatProvider: byokChatProvider,
+                userMessage: userText, // 用户消息
+                assistantMessage: accumulatedAssistantText, // 助手完整响应
+                projectId: project.id, // 项目ID
+                conversationId: runConversationId, // 会话ID
+                chatProvider: byokChatProvider, // 聊天提供者配置
               }),
             }).catch(() => {
-              // Best-effort: see comment above on the pre-turn call.
+              // 尽力而为：参见上文关于轮次前调用的注释
             });
           },
+<<<<<<< Updated upstream
           onError: (err: Error) => {
             handlers.onError(err);
             emitByokRunFinished(controller.signal.aborted ? 'cancelled' : 'failed', 0);
           },
+=======
+          
+          // 错误回调
+          onError: handlers.onError,
+>>>>>>> Stashed changes
         }, {
-          projectId: project.id,
-          // SenseAudio BYOK chat reads this to pre-fill the tool param's
-          // default model. Prefer the live composer override; fall back
-          // to the Settings default when the composer dropdown is on
-          // "use default". Other protocols ignore unknown body fields.
+          projectId: project.id, // 项目ID
+          // SenseAudio BYOK聊天读取此字段以预填充工具参数的默认模型。
+          // 优先使用编辑器中的实时覆盖值；当编辑器下拉菜单选择"使用默认值"时回退到设置中的默认值。
+          // 其他协议会忽略未知的请求体字段
           byokImageModel:
-            byokImageModelOverride || config.byokImageModel || byokImageModelOptionsPV[0]?.id,
+            byokImageModelOverride || config.byokImageModel || byokImageModelOptionsPV[0]?.id, // BYOK图像模型选择
           byokVideoModel:
-            byokVideoModelOverride || config.byokVideoModel || byokVideoModelOptionsPV[0]?.id,
+            byokVideoModelOverride || config.byokVideoModel || byokVideoModelOptionsPV[0]?.id, // BYOK视频模型选择
           byokSpeechModel:
-            byokSpeechModelOverride || config.byokSpeechModel || byokSpeechModelOptionsPV[0]?.id,
-          byokSpeechVoice: byokSpeechVoiceOverride || config.byokSpeechVoice,
+            byokSpeechModelOverride || config.byokSpeechModel || byokSpeechModelOptionsPV[0]?.id, // BYOK语音模型选择
+          byokSpeechVoice: byokSpeechVoiceOverride || config.byokSpeechVoice, // BYOK语音音色选择
         });
-        return true;
+        return true; // 返回true表示已处理API模式
       }
     },
     [
-      attachedComments,
-      activeConversationId,
-      activeSessionMode,
-      currentConversationBusy,
-      queueChatSendForCurrentConversation,
-      messages,
-      config,
-      locale,
-      agentsById,
-      // Per-session BYOK image/video model overrides are read inside this
-      // callback (see the streamMessage context below). Without them in the
-      // deps, the dropdown updates its state + display but handleSend keeps a
-      // stale closure and sends the previously selected model.
-      byokImageModelOverride,
-      byokVideoModelOverride,
-      byokSpeechModelOverride,
-      byokSpeechVoiceOverride,
-      byokImageModelOptionsPV,
-      byokVideoModelOptionsPV,
-      byokSpeechModelOptionsPV,
-      composedSystemPrompt,
-      onTouchProject,
-      project.id,
-      project.name,
-      projectFiles,
-      refreshProjectFiles,
-      refreshLiveArtifacts,
-      readProjectHtml,
-      requestOpenFile,
-      persistMessage,
-      persistMessageById,
-      auditDesignSystemWorkspaceAfterRun,
-      patchAttachedStatuses,
-      updateMessageById,
-      markStreamingConversation,
-      clearStreamingMarker,
-      clearCurrentRunStreamingMarker,
-      clearProjectTimeout,
-      scheduleConversationMessageRefresh,
-      scheduleProjectTimeout,
-      onProjectsRefresh,
-      onProjectChange,
+      // 依赖项数组：当这些值变化时，useCallback会重新创建handleSend函数
+      attachedComments, // 附加评论列表
+      activeConversationId, // 活跃会话ID
+      activeSessionMode, // 活跃会话模式
+      currentConversationBusy, // 当前会话忙碌状态
+      queueChatSendForCurrentConversation, // 排队发送消息的函数
+      messages, // 消息列表
+      config, // 配置对象（包含模式、API密钥、模型等）
+      locale, // 语言区域设置
+      agentsById, // 代理ID到代理对象的映射
+      // 每个会话的BYOK图像/视频模型覆盖值在此回调内部读取（参见下面的streamMessage上下文）。
+      // 如果它们不在依赖项中，下拉菜单会更新其状态和显示，但handleSend保留过时的闭包并发送先前选择的模型
+      byokImageModelOverride, // BYOK图像模型覆盖值
+      byokVideoModelOverride, // BYOK视频模型覆盖值
+      byokSpeechModelOverride, // BYOK语音模型覆盖值
+      byokSpeechVoiceOverride, // BYOK语音音色覆盖值
+      byokImageModelOptionsPV, // BYOK图像模型选项（持久化值）
+      byokVideoModelOptionsPV, // BYOK视频模型选项（持久化值）
+      byokSpeechModelOptionsPV, // BYOK语音模型选项（持久化值）
+      composedSystemPrompt, // 组合系统提示词的函数
+      onTouchProject, // 项目触摸事件处理函数
+      project.id, // 项目ID
+      project.name, // 项目名称
+      projectFiles, // 项目文件列表
+      refreshProjectFiles, // 刷新项目文件的函数
+      refreshLiveArtifacts, // 刷新实时工件的函数
+      readProjectHtml, // 读取项目HTML的函数
+      requestOpenFile, // 请求打开文件的函数
+      persistMessage, // 持久化消息的函数
+      persistMessageById, // 按ID持久化消息的函数
+      auditDesignSystemWorkspaceAfterRun, // 运行后审计设计系统工作区的函数
+      patchAttachedStatuses, // 更新附件状态的函数
+      updateMessageById, // 按ID更新消息的函数
+      markStreamingConversation, // 标记流式传输会话的函数
+      clearStreamingMarker, // 清除流标记的函数
+      clearCurrentRunStreamingMarker, // 清除当前运行流标记的函数
+      clearProjectTimeout, // 清除项目超时的函数
+      scheduleConversationMessageRefresh, // 安排会话消息刷新的函数
+      scheduleProjectTimeout, // 安排项目超时的函数
+      onProjectsRefresh, // 项目刷新事件处理函数
+      onProjectChange, // 项目变更事件处理函数
     ],
   );
 

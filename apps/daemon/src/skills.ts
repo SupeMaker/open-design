@@ -136,16 +136,15 @@ export function findSkillById(skills: unknown, id: unknown): SkillInfo | undefin
   return (skills as SkillInfo[]).find((s) => s.id === canonical);
 }
 
-// Accept either a single root path or an array. When given multiple roots,
-// the first one wins on id collisions so user-imported skills under
-// USER_SKILLS_DIR can shadow a built-in skill of the same name without
-// erasing the bundled copy. Each surfaced summary carries a `source`
-// (`"user"` for the first root, `"built-in"` for any later root) so the
-// UI can render an origin pill and gate the delete control.
+// 接受单个根路径或数组。当给定多个根路径时，
+// 若发生id冲突，则以第一个路径为准，这样用户导入的技能（位于 USER_SKILLS_DIR 下）
+// 可以覆盖同名内置技能，而不会删除捆绑的副本。每个展示的技能摘要都带有 `source`
+// 字段（第一个根路径为 `"user"`，后续根路径为 `"built-in"`），
+// 以便UI可以显示来源标签并控制删除按钮的显示。
 export async function listSkills(
   skillsRoots: string | readonly string[],
 ): Promise<SkillInfo[]> {
-  const roots = Array.isArray(skillsRoots) ? skillsRoots : [skillsRoots];
+  const roots = Array.isArray(skillsRoots) ? skillsRoots : [skillsRoots]; // skillsRoots: ["D:\\Master\\projects\\github\\open-design\\skills"]
   const out: SkillInfo[] = [];
   const seenIds = new Set<string>();
   for (let rootIdx = 0; rootIdx < roots.length; rootIdx += 1) {
@@ -158,10 +157,10 @@ export async function listSkills(
     } catch {
       continue;
     }
-    for (const entry of entries) {
+    for (const entry of entries) { // 每个 entry: {name: "8-bit-orbit-video-template", parentPath: "D:\\Master\\projects\\github\\open-design\\skills"}
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const dir = path.join(skillsRoot, entry.name);
-      const skillPath = path.join(dir, "SKILL.md");
+      const skillPath = path.join(dir, "SKILL.md"); // "D:\\Master\\projects\\github\\open-design\\skills\\8-bit-orbit-video-template\\SKILL.md"
       try {
         const stats = await stat(skillPath);
         if (!stats.isFile()) continue;
@@ -170,7 +169,7 @@ export async function listSkills(
           data: unknown;
           body: string;
         };
-        const data = asSkillFrontmatter(parsedData);
+        const data = asSkillFrontmatter(parsedData); // 解析SKILL.md文件的frontmatter，提取技能的元数据。得到 {"description", "name", "od", "triggers"}等字段
         const parentId =
           typeof data.name === "string" && data.name ? data.name : entry.name;
         // Skip when an earlier root already surfaced this id — the first
@@ -179,7 +178,7 @@ export async function listSkills(
         if (seenIds.has(parentId)) continue;
         seenIds.add(parentId);
         const hasAttachments = await dirHasAttachments(dir);
-        const mode = normalizeMode(data.od?.mode, body, data.description);
+        const mode = normalizeMode(data.od?.mode, body, data.description); // 获取skill中的 od.mode
         const surface = normalizeSurface(data.od?.surface, mode);
         const platform = normalizePlatform(
           data.od?.platform,

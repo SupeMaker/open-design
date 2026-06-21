@@ -80,6 +80,18 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
     supportsCustomModel: true,
     customModelPlaceholder: 'gpt-image-2 or dall-e-3',
   },
+  {
+    id: 'agnes',
+    label: 'Agnes',
+    hint: 'Agnes image + video gateway',
+    integrated: true,
+    credentialsRequired: true,
+    settingsVisible: true,
+    defaultBaseUrl: 'https://apihub.agnes-ai.com',
+    docsUrl: 'https://agnes-ai.com/doc',
+    supportsCustomModel: true,
+    customModelPlaceholder: 'agnes-image-2.1-flash or agnes-video-v2.0',
+  },
   { id: 'tavily', label: 'Tavily Search', hint: 'Agent-callable web research', integrated: true, defaultBaseUrl: 'https://api.tavily.com' },
   { id: 'stub', label: 'Stub (placeholder)', hint: 'Deterministic local placeholder bytes', integrated: true },
 ];
@@ -105,6 +117,9 @@ export const IMAGE_MODELS: MediaModel[] = [
   // `aihubmix-` prefix is stripped to the real wire name in media.ts.
   { id: 'aihubmix-gpt-image-1', label: 'gpt-image-1 (AIHubMix)', hint: 'AIHubMix · OpenAI gpt-image-1', provider: 'aihubmix', caps: ['t2i', 'i2i'] },
   { id: 'aihubmix-dall-e-3', label: 'dall-e-3 (AIHubMix)', hint: 'AIHubMix · OpenAI DALL·E 3', provider: 'aihubmix', caps: ['t2i'] },
+
+  { id: 'agnes-image-2.0-flash', label: 'agnes-image-2.0-flash', hint: 'Agnes · text-to-image', provider: 'agnes', caps: ['t2i', 'i2i'], default: true },
+  { id: 'agnes-image-2.1-flash', label: 'agnes-image-2.1-flash', hint: 'Agnes · text-to-image latest', provider: 'agnes', caps: ['t2i', 'i2i'] },
 
   { id: 'grok-imagine-image', label: 'grok-imagine-image', hint: 'xAI · 2K text-to-image', provider: 'grok', caps: ['t2i'] },
 
@@ -169,6 +184,8 @@ export const VIDEO_MODELS: MediaModel[] = [
   { id: 'xAI/grok-imagine-video', label: 'xAI/grok-imagine-video', hint: 'ImageRouter · routed video', provider: 'imagerouter', caps: ['t2v', 'audio'] },
   { id: 'bytedance/seedance-1.5-pro', label: 'seedance-1.5-pro', hint: 'ImageRouter · Bytedance', provider: 'imagerouter', caps: ['t2v'] },
   { id: 'google/veo-3.1-lite', label: 'veo-3.1-lite', hint: 'ImageRouter · Google', provider: 'imagerouter', caps: ['t2v'] },
+
+  { id: 'agnes-video-v2.0', label: 'agnes-video-v2.0', hint: 'Agnes · text-to-video', provider: 'agnes', caps: ['t2v', 'i2v'], default: true },
 
   { id: 'kling-2.0', label: 'kling-2.0', hint: 'Kuaishou · latest', provider: 'kling', caps: ['t2v', 'i2v'] },
   { id: 'kling-1.6', label: 'kling-1.6', hint: 'Kuaishou', provider: 'kling', caps: ['t2v', 'i2v'] },

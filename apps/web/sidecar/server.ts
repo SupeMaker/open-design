@@ -78,7 +78,7 @@ function createNextApp(options: { dev: boolean; dir: string } & NextBundlerOptio
 
 export function resolveNextBundlerOptions(isDev: boolean): NextBundlerOptions {
   if (!isDev) return {};
-  const configured = (process.env.OD_WEB_DEV_BUNDLER ?? "webpack").trim().toLowerCase();
+  const configured = (process.env.OD_WEB_DEV_BUNDLER ?? "webpack").trim().toLowerCase(); // configured = "webpack"
   if (configured === "turbopack" || configured === "turbo") return { turbopack: true };
   return { webpack: true };
 }

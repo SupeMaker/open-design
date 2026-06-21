@@ -10,16 +10,21 @@ import {
 import {
   BYOK_SENSEAUDIO_TOOLS,
   BYOK_AIHUBMIX_TOOLS,
+  BYOK_AGNES_TOOLS,
   executeGenerateImage,
   executeGenerateSpeech,
   executeGenerateVideo,
   executeAIHubMixGenerateImage,
   executeAIHubMixGenerateSpeech,
   executeAIHubMixGenerateVideo,
+  executeAgnesGenerateImage,
+  executeAgnesGenerateVideo,
   isSenseAudioImageModel,
   isAIHubMixImageModel,
   isAIHubMixVideoModel,
   isAIHubMixSpeechModel,
+  isAgnesImageModel,
+  isAgnesVideoModel,
   type BYOKToolContext,
   type ImageToolResult,
 } from '../byok-tools.js';
@@ -1529,16 +1534,16 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
       workingMessages.unshift({ role: 'system', content: systemPrompt });
     }
 
-    // Tool execution context — built once per request. The image tool
-    // writes into `<projectsRoot>/<projectId>/byok-<id>.png` and returns
-    // a relative URL via `/api/projects/:id/files/:filename`. The web's
-    // Next.js rewrites `/api/:path*` to the daemon, so the chat UI
-    // loads images same-origin through the standard project file
-    // route — no CSP / CORS exceptions needed.
-    // User-configured BYOK default image model. Drop silently if the
-    // client sent an id outside the provider's registry — the tool
-    // will fall back to the registry default and the LLM can still
-    // override per-call via the tool's `model` arg.
+    // 工具执行上下文 — 每个请求构建一次。图像工具
+    // 写入 `<projectsRoot>/<projectId>/byok-<id>.png` 并返回
+    // 一个相对 URL，路径为 `/api/projects/:id/files/:filename`。Web 端
+    // 的 Next.js 将 `/api/:path*` 重写至守护进程，因此聊天 UI
+    // 通过标准的项目文件路由以同源方式加载图像 —
+    // 无需 CSP / CORS 例外配置。
+    // 用户配置的 BYOK 默认图像模型。如果客户端发送的 id 不在
+    // 提供者注册表中，则静默丢弃该值 — 工具
+    // 将回退至注册表默认值，且 LLM 仍可通过工具的 `model` 参数
+    // 在每次调用时覆盖该默认值。
     const validDefaultImageModel = opts.isImageModel(byokImageModel)
       ? byokImageModel
       : undefined;
@@ -2248,6 +2253,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     routeByModel: true,
   });
 
+<<<<<<< Updated upstream:apps/daemon/src/routes/chat.ts
   app.post('/api/proxy/:provider/stream', (req, res) => {
     const proxyBody = req.body || {};
     const provider = typeof req.params.provider === 'string' ? req.params.provider : 'unknown';
@@ -2260,6 +2266,23 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     });
     if (reasoningDenial) return sendReasoningEgressDenial(res, reasoningDenial);
     return sendApiError(res, 404, 'NOT_FOUND', 'unknown proxy provider');
+=======
+  // Agnes: fixed-origin OpenAI-compatible gateway for chat completions,
+  // image generation (/v1/images/generations) and async video generation
+  // (/v1/videos submit → /agnesapi poll). Bearer auth; no model-name divert.
+  registerByokToolChatProxy('/api/proxy/agnes/stream', {
+    providerId: 'agnes',
+    logTag: 'proxy:agnes',
+    defaultBaseUrl: 'https://apihub.agnes-ai.com/v1',
+    tools: BYOK_AGNES_TOOLS,
+    buildHeaders: (apiKey) => ({ Authorization: `Bearer ${apiKey}` }),
+    isImageModel: isAgnesImageModel,
+    isVideoModel: isAgnesVideoModel,
+    runImage: executeAgnesGenerateImage,
+    runVideo: executeAgnesGenerateVideo,
+    // Agnes does not expose a speech endpoint through this gateway.
+    runSpeech: async () => ({ ok: false, error: 'speech generation is not supported for Agnes' }),
+>>>>>>> Stashed changes:apps/daemon/src/chat-routes.ts
   });
 
 }

@@ -708,6 +708,16 @@ export async function generateMedia(args: {
       bytes = result.bytes;
       providerNote = result.providerNote;
       suggestedExt = result.suggestedExt;
+    } else if (def.provider === 'agnes' && surface === 'image') {
+      const result = await renderAgnesImage(ctx, credentials);
+      bytes = result.bytes;
+      providerNote = result.providerNote;
+      suggestedExt = result.suggestedExt;
+    } else if (def.provider === 'agnes' && surface === 'video') {
+      const result = await renderAgnesVideo(ctx, credentials, args.onProgress);
+      bytes = result.bytes;
+      providerNote = result.providerNote;
+      suggestedExt = result.suggestedExt;
     } else if (def.provider === 'fishaudio' && surface === 'audio') {
       const result = await renderFishAudioTTS(ctx, credentials);
       bytes = result.bytes;
@@ -3078,6 +3088,243 @@ async function renderSenseAudioImage(ctx: MediaContext, credentials: ProviderCon
     bytes,
     providerNote: `senseaudio/${ctx.wireModel} · ${size}${reference ? ' · i2i' : ''} · ${bytes.length} bytes`,
     suggestedExt: '.png',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Provider: Agnes — OpenAI-wire-compatible image + video gateway.
+//
+// Image: POST /v1/images/generations
+//   * `response_format` must live inside `extra_body`, not the top-level body,
+//     or the gateway returns 400.
+//   * t2i: model + prompt + size + extra_body.response_format
+//   * i2i: model + prompt + size + image (top-level array of URLs/data URIs)
+//   * Response: { data: [{ url, b64_json }] }
+//
+// Video: POST /v1/videos → GET /agnesapi?video_id=<id>
+//   * Async task API. Submit returns video_id; poll returns status + the
+//     generated URL in `remixed_from_video_id`.
+//   * Dimensions map aspect → concrete width/height; num_frames/frame_rate
+//     derive from the requested length.
+// ---------------------------------------------------------------------------
+
+const AGNES_DEFAULT_BASE_URL = 'https://apihub.agnes-ai.com';
+const AGNES_IMAGE_PROMPT_LIMIT = 2000;
+
+function agnesImageSize(aspect?: string): string {
+  if (aspect === '16:9') return '1024x768';
+  if (aspect === '9:16') return '768x1024';
+  if (aspect === '4:3') return '1024x768';
+  if (aspect === '3:4') return '768x1024';
+  return '1024x1024';
+}
+
+async function renderAgnesImage(ctx: MediaContext, credentials: ProviderConfig): Promise<RenderResult> {
+  if (!credentials.apiKey) {
+    throw new Error('no Agnes API key — configure it in Settings or set OD_AGNES_API_KEY');
+  }
+  const baseUrl = (credentials.baseUrl || AGNES_DEFAULT_BASE_URL).replace(/\/$/, '');
+  const promptRaw = (ctx.prompt && ctx.prompt.trim()) || 'A high-quality reference image.';
+  const prompt =
+    promptRaw.length > AGNES_IMAGE_PROMPT_LIMIT
+      ? promptRaw.slice(0, AGNES_IMAGE_PROMPT_LIMIT)
+      : promptRaw;
+  const size = agnesImageSize(ctx.aspect);
+  const reference = ctx.imageRef?.dataUrl;
+
+  const body: Record<string, unknown> = {
+    model: ctx.wireModel,
+    prompt,
+    size,
+    extra_body: { response_format: 'url' },
+  };
+  if (reference) {
+    // i2i: image array can live at the top level per Agnes docs.
+    body.image = [reference];
+  }
+
+  const resp = await fetch(`${baseUrl}/v1/images/generations`, withMediaRequestInit(ctx, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${credentials.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  }));
+  const respText = await resp.text();
+  if (!resp.ok) {
+    throw new Error(`agnes image ${resp.status}: ${truncate(respText, 240)}`);
+  }
+  let data: any;
+  try {
+    data = JSON.parse(respText);
+  } catch {
+    throw new Error(`agnes image non-JSON: ${truncate(respText, 200)}`);
+  }
+  const entry = data && Array.isArray(data.data) ? data.data[0] : null;
+  if (!entry) throw new Error('agnes image response had no data[0]');
+
+  let bytes: Buffer;
+  if (typeof entry.b64_json === 'string' && entry.b64_json) {
+    const raw = entry.b64_json.includes(',')
+      ? entry.b64_json.slice(entry.b64_json.indexOf(',') + 1)
+      : entry.b64_json;
+    bytes = Buffer.from(raw, 'base64');
+  } else if (typeof entry.url === 'string' && entry.url) {
+    const imgResp = await assertAndFetchExternalAsset(entry.url, withMediaRequestInit(ctx));
+    if (!imgResp.ok) throw new Error(`agnes image fetch ${imgResp.status}`);
+    bytes = Buffer.from(await imgResp.arrayBuffer());
+  } else {
+    throw new Error('agnes image response had neither b64_json nor url');
+  }
+  if (bytes.length === 0) {
+    throw new Error('agnes image returned zero bytes');
+  }
+
+  return {
+    bytes,
+    providerNote: `agnes/${ctx.wireModel} · ${size}${reference ? ' · i2i' : ''} · ${bytes.length} bytes`,
+    suggestedExt: '.png',
+  };
+}
+
+function agnesVideoDimensions(aspect?: string): { width: number; height: number } {
+  switch (aspect) {
+    case '9:16':
+      return { width: 720, height: 1280 };
+    case '1:1':
+      return { width: 1024, height: 1024 };
+    case '4:3':
+      return { width: 1024, height: 768 };
+    case '3:4':
+      return { width: 768, height: 1024 };
+    case '16:9':
+    default:
+      return { width: 1152, height: 768 };
+  }
+}
+
+function agnesVideoFramesForLength(seconds: number): number {
+  // Agnes requires num_frames ≤ 441 and num_frames = 8n + 1.
+  // Pick the nearest valid frame count for the requested duration at 24 fps.
+  const frames = Math.round(seconds * 24);
+  const clamped = Math.min(441, Math.max(9, frames));
+  const n = Math.round((clamped - 1) / 8);
+  return Math.min(441, Math.max(9, n * 8 + 1));
+}
+
+async function renderAgnesVideo(
+  ctx: MediaContext,
+  credentials: ProviderConfig,
+  onProgress?: ProgressFn,
+): Promise<RenderResult> {
+  if (!credentials.apiKey) {
+    throw new Error('no Agnes API key — configure it in Settings or set OD_AGNES_API_KEY');
+  }
+  const baseUrl = (credentials.baseUrl || AGNES_DEFAULT_BASE_URL).replace(/\/$/, '');
+  const prompt = (ctx.prompt && ctx.prompt.trim()) || 'A short cinematic clip.';
+  const { width, height } = agnesVideoDimensions(ctx.aspect);
+  const lengthSec = ctx.length || 5;
+  const frameRate = 24;
+  const numFrames = agnesVideoFramesForLength(lengthSec);
+  const reference = ctx.imageRef?.dataUrl;
+
+  const body: Record<string, unknown> = {
+    model: ctx.wireModel,
+    prompt,
+    width,
+    height,
+    num_frames: numFrames,
+    frame_rate: frameRate,
+  };
+  if (reference) {
+    body.image = reference;
+  }
+
+  console.log(
+    `[media:agnes] video submit POST ${baseUrl}/v1/videos model=${ctx.wireModel} ${width}x${height} frames=${numFrames}`,
+  );
+  const submitResp = await fetch(`${baseUrl}/v1/videos`, withMediaRequestInit(ctx, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${credentials.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  }));
+  const submitText = await submitResp.text();
+  if (!submitResp.ok) {
+    throw new Error(`agnes video submit ${submitResp.status}: ${truncate(submitText, 240)}`);
+  }
+  let submitData: any;
+  try {
+    submitData = JSON.parse(submitText);
+  } catch {
+    throw new Error(`agnes video non-JSON: ${truncate(submitText, 200)}`);
+  }
+  const videoId = submitData?.video_id || submitData?.id;
+  if (!videoId) throw new Error('agnes video response missing video_id');
+
+  const startedAt = Date.now();
+  const configuredMaxMs = Number(process.env.OD_AGNES_VIDEO_MAX_POLL_MS);
+  const maxMs =
+    Number.isFinite(configuredMaxMs) && configuredMaxMs >= 60_000
+      ? configuredMaxMs
+      : 12 * 60 * 1000;
+  if (typeof onProgress === 'function') {
+    onProgress(`agnes ${reference ? 'i2v' : 't2v'} video ${videoId} accepted; polling status…`);
+  }
+
+  let lastStatus = '';
+  let videoUrl: string | null = null;
+  while (Date.now() - startedAt < maxMs) {
+    await sleep(5000);
+    const pollResp = await fetch(
+      `${baseUrl}/agnesapi?video_id=${encodeURIComponent(videoId)}`,
+      withMediaRequestInit(ctx, {
+        headers: { authorization: `Bearer ${credentials.apiKey}` },
+      }),
+    );
+    const pollText = await pollResp.text();
+    if (!pollResp.ok) {
+      throw new Error(`agnes video poll ${pollResp.status}: ${truncate(pollText, 240)}`);
+    }
+    let pollData: any;
+    try {
+      pollData = JSON.parse(pollText);
+    } catch {
+      throw new Error(`agnes video poll non-JSON: ${truncate(pollText, 200)}`);
+    }
+    lastStatus = pollData?.status || '';
+    if (typeof onProgress === 'function') {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000);
+      onProgress(`agnes video ${videoId} status=${lastStatus || 'pending'} (elapsed ${elapsedSec}s)`);
+    }
+    if (lastStatus === 'completed') {
+      videoUrl = pollData?.remixed_from_video_id || null;
+      break;
+    }
+    if (lastStatus === 'failed') {
+      const reason = pollData?.error?.message || pollData?.error || 'unknown';
+      throw new Error(`agnes video task failed: ${truncate(reason, 240)}`);
+    }
+  }
+  if (!videoUrl) {
+    throw new Error(`agnes video did not finish in time (last status: ${lastStatus || 'unknown'})`);
+  }
+
+  const dlResp = await assertAndFetchExternalAsset(videoUrl, withMediaRequestInit(ctx));
+  if (!dlResp.ok) throw new Error(`agnes video fetch ${dlResp.status}`);
+  const bytes = Buffer.from(await dlResp.arrayBuffer());
+  if (bytes.length === 0) {
+    throw new Error('agnes video returned zero bytes');
+  }
+
+  const actualSeconds = (numFrames / frameRate).toFixed(1);
+  return {
+    bytes,
+    providerNote: `agnes/${ctx.wireModel} · ${width}x${height} · ${actualSeconds}s · ${bytes.length} bytes`,
+    suggestedExt: '.mp4',
   };
 }
 

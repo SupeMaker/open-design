@@ -593,6 +593,7 @@ export function EntryShell({
   function handlePluginLoopSubmit(payload: PluginLoopSubmit): Promise<boolean> | boolean | void {
     const summarizedName = summarizeProjectNameFromPrompt(payload.prompt);
     const head = payload.prompt.trim().split(/\s+/).slice(0, 8).join(' ');
+    console.log("head: ", head)
     const firstAttachmentName = payload.attachments?.[0]?.name ?? '';
     const fallbackName =
       summarizedName || (head.length > 0 ? head : firstAttachmentName || 'Untitled');
@@ -626,6 +627,7 @@ export function EntryShell({
         examplePromptBrief: payload.examplePromptContext.brief,
       } : {}),
     };
+    console.log("metadata: ", metadata)
     return onCreateProject({
       name,
       skillId: payload.skillId ?? null,
