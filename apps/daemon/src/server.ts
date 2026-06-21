@@ -274,6 +274,11 @@ import {
   snapshotProjectArtifacts,
 } from './run-artifact-fs.js';
 import {
+  createRunArtifactBaselines,
+  diffRunArtifacts,
+  snapshotProjectArtifacts,
+} from './run-artifact-fs.js';
+import {
   reportRunCompletedFromDaemon,
   reportRunFeedbackFromDaemon,
 } from './langfuse-bridge.js';

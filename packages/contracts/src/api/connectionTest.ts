@@ -181,7 +181,6 @@ export interface ConnectionTestDiagnostics {
 
 export type ConnectionTestProtocol = 'anthropic' | 'openai' | 'azure' | 'google' | 'ollama' | 'senseaudio' | 'agnes' | 'aihubmix';
 
-
 export interface ProviderTestRequest extends ReasoningExecutionRequestFields {
   protocol: ConnectionTestProtocol;
   baseUrl: string;
