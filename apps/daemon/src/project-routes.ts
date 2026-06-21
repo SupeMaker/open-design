@@ -921,8 +921,8 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   const { validateProjectDesignSystemId, validateProjectSkillId } = ctx.validation;
   async function loadPluginRegistryView() {
     const [skills, designSystems] = await Promise.all([
-      listSkills(SKILLS_DIR),
-      listDesignSystems(DESIGN_SYSTEMS_DIR),
+      listSkills(SKILLS_DIR), // TODO 列举出所有skills，这里只加载内置的skills，并且只加载元数据。
+      listDesignSystems(DESIGN_SYSTEMS_DIR), // 列举出所有设计系统
     ]);
     return {
       skills: skills.map((s) => ({ id: s.id, title: s.name, description: s.description })),
@@ -1208,13 +1208,14 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
   }
 
   app.post('/api/projects', async (req, res) => {
+
     try {
       const { id, name, projectLocationId, skillId, designSystemId, pendingPrompt, metadata, customInstructions, skipDiscoveryBrief } =
         req.body || {};
       if (typeof id !== 'string' || !isSafeId(id)) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'invalid project id');
       }
-      if (typeof name !== 'string' || !name.trim()) {
+      if (typeof name !== 'string' || !name.trim()) { // name 是开头的一段字符串
         return sendApiError(res, 400, 'BAD_REQUEST', 'name required');
       }
       // baseDir is privileged: it lets a project root directly inside the
@@ -1225,7 +1226,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       // can't smuggle e.g. /etc through here. Same rule for
       // originalBaseDir / importedFrom='folder' — only the import path
       // owns those state fields.
-      if (metadata && typeof metadata === 'object') {
+      if (metadata && typeof metadata === 'object') { // {"kind": "other", "nameSource": "prompt"}
         if ('baseDir' in metadata) {
           return sendApiError(
             res, 400, 'BAD_REQUEST',
@@ -1283,7 +1284,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         return sendApiError(res, 400, skillValidation.code, skillValidation.message);
       }
       const normalizedSkillId = skillValidation.id;
-      const selectedLocationId = await resolveCreateProjectLocationId(projectLocationId);
+      const selectedLocationId = await resolveCreateProjectLocationId(projectLocationId); // default
       let externalProjectDir: string | null = null;
       if (selectedLocationId !== BUILT_IN_PROJECT_LOCATION_ID) {
         const location = (await configuredProjectLocations()).find((loc: any) => loc.id === selectedLocationId);
@@ -1349,8 +1350,8 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         }
         project = insertProject(db, {
           id,
-          name: name.trim(),
-          skillId: normalizedSkillId,
+          name: name.trim(), // 用户的query
+          skillId: normalizedSkillId, // skill
           designSystemId: normalizedDesignSystemId,
           pendingPrompt: pendingPrompt || null,
           metadata: projectMetadata,
@@ -1367,11 +1368,11 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
         }
         throw err;
       }
-      // Seed a default conversation so the UI always has somewhere to write.
+      // Seed a default conversation so the UI always has somewhere to write. 设置conversation的模式
       const cid = randomId();
       const initialSessionMode = normalizeChatSessionMode(
         req.body?.conversationMode ?? req.body?.sessionMode,
-      );
+      ); // initialSessionMode: design
       insertConversation(db, {
         id: cid,
         projectId: id,
@@ -1386,7 +1387,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
           : typeof req.body?.appliedPluginSnapshotId === 'string'
             && req.body.appliedPluginSnapshotId.trim().length > 0;
       let resolveBody =
-        explicitPlugin ? (req.body as Record<string, unknown>) : null;
+        explicitPlugin ? (req.body as Record<string, unknown>) : null; // {"id": "bed965d9-8b00-4dec-833c-617e7d5f4895", "conversationMode": "design", "name": "电影感神话自然核落地页", "pendingPrompt": "完整的query", "pluginId": "od-default", "pluginInputs":{"prompt": "完整的query"}, "skillId": null} 
       if (!resolveBody && initialSessionMode === 'design') {
         const fallbackPluginId = defaultScenarioPluginIdForProjectMetadata(projectMetadata);
         if (fallbackPluginId && getInstalledPlugin(db, fallbackPluginId)) {
@@ -1395,7 +1396,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       }
       let resolvedSnapshot = null;
       if (resolveBody) {
-        const registry = await loadPluginRegistryView();
+        const registry = await loadPluginRegistryView(); // TODO 加载内置的skills和design-systems系统
         const resolved = resolvePluginSnapshot({
           db,
           body: resolveBody,
@@ -1484,55 +1485,71 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
 
   app.patch('/api/projects/:id', async (req, res) => {
     try {
-      const patch = req.body || {};
-      // baseDir / folder-import state is privileged: it's set only by the
-      // import endpoint and otherwise immutable. Two failure modes to
-      // guard against here:
-      //   1. Explicit attempt to change baseDir → reject with 400.
-      //   2. A regular metadata patch that *omits* baseDir (e.g. a UI
-      //      that only edits linkedDirs sends `{ metadata: { kind, linkedDirs } }`).
-      //      updateProject() replaces metadata wholesale, so without
-      //      preservation the existing baseDir gets wiped and the project
-      //      detaches from the user's folder — subsequent reads/writes
-      //      silently fall back to .od/projects/<id>.
-      // For case 2 we re-stamp the immutable fields from the existing
-      // project record onto the incoming patch so the user can keep
-      // patching other metadata without ever losing their import root.
+      const patch = req.body || {}; // 获取请求体中的补丁数据，默认为空对象
+      
+      // baseDir（项目根目录）/ folder-import（文件夹导入）状态是受保护的：
+      // 它只能由导入端点设置，除此之外不可变。
+      // 这里需要防范两种失败模式：
+      //   1. 显式尝试修改 baseDir → 拒绝请求，返回 400。
+      //   2. 一个常规的元数据补丁请求，但它*遗漏*了 baseDir 字段
+      //      （例如，一个只编辑 linkedDirs 的 UI 发送了
+      //      `{ metadata: { kind, linkedDirs } }`）。
+      //      updateProject() 会整体替换 metadata，所以如果不做保留处理，
+      //      现有的 baseDir 会被抹掉，项目就会与用户的文件夹断开连接 ——
+      //      后续的读写操作会静默地回退到 .od/projects/<id> 目录。
+      // 针对情况2，我们将现有项目记录中的不可变字段重新写回到
+      // 传入的补丁数据上，这样用户就可以持续修改其他元数据字段，
+      // 而永远不会丢失他们的导入根目录。
+      
+      // 如果请求试图将 metadata 设为 null（清空元数据）
       if (patch.metadata === null) {
-        const existing = getProject(db, req.params.id);
+        const existing = getProject(db, req.params.id); // 获取项目现有数据
         if (existing?.metadata?.baseDir) {
+          // 已导入的项目不允许清空元数据
           return sendApiError(
             res,
-            400,
-            'BAD_REQUEST',
-            'metadata cannot be cleared for imported projects',
+            400, // HTTP 状态码：错误的请求
+            'BAD_REQUEST', // 错误代码：错误的请求
+            'metadata cannot be cleared for imported projects', // 错误消息：已导入的项目不能清空元数据
           );
         }
       }
+      
+      // 如果补丁中包含 metadata 对象
       if (patch.metadata && typeof patch.metadata === 'object') {
-        const existing = getProject(db, req.params.id);
-        const existingMeta = existing?.metadata;
+        const existing = getProject(db, req.params.id); // 获取项目现有数据
+        const existingMeta = existing?.metadata; // 获取现有的元数据
+        
+        // 检查是否试图修改 fromTrustedPicker 字段
         if ('fromTrustedPicker' in patch.metadata
             && patch.metadata.fromTrustedPicker !== existingMeta?.fromTrustedPicker) {
+          // fromTrustedPicker 只能通过文件夹导入端点设置
           return sendApiError(
-            res, 400, 'BAD_REQUEST',
-            'fromTrustedPicker can only be set via POST /api/import/folder',
+            res, 400, 'BAD_REQUEST', // HTTP 400 错误
+            'fromTrustedPicker can only be set via POST /api/import/folder', // 错误消息
           );
         }
+        
+        // 如果补丁中尝试修改 orchestratorWorkspace 字段
         if ('orchestratorWorkspace' in patch.metadata) {
+          // 验证 orchestratorWorkspace 的格式是否合法
           const parsedOrchestratorWorkspace = parseOrchestratorWorkspace(
             patch.metadata.orchestratorWorkspace,
           );
           if (!parsedOrchestratorWorkspace.ok) {
+            // 格式不合法，返回 400 错误
             return sendApiError(
               res,
               400,
               'BAD_REQUEST',
-              parsedOrchestratorWorkspace.message,
+              parsedOrchestratorWorkspace.message, // 返回具体的错误消息
             );
           }
         }
+        
+        // 如果项目已有 baseDir（说明是通过导入创建的）
         if (existingMeta?.baseDir) {
+          // 检查是否试图修改 orchestratorWorkspace
           if ('orchestratorWorkspace' in patch.metadata) {
             if (
               existingMeta.orchestratorWorkspace == null ||
@@ -1541,100 +1558,129 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
                 existingMeta.orchestratorWorkspace,
               )
             ) {
+              // orchestratorWorkspace 在导入后不可变；使用 working-dir 路由来更改它
               return sendApiError(
                 res, 400, 'BAD_REQUEST',
                 'orchestratorWorkspace is immutable after import; use the working-dir route to change it',
               );
             }
           }
+          
+          // 检查是否试图修改 baseDir 且新值与旧值不同
           if ('baseDir' in patch.metadata && patch.metadata.baseDir !== existingMeta.baseDir) {
+            // baseDir 在导入后不可变；需要重新导入才能更改
             return sendApiError(
               res, 400, 'BAD_REQUEST',
               'baseDir is immutable after import; use a new import to change it',
             );
           }
+          
+          // 情况2的处理：将不可变字段从现有记录重新写回到补丁上
           patch.metadata = {
-            ...patch.metadata,
-            baseDir: existingMeta.baseDir,
+            ...patch.metadata, // 保留补丁中的所有字段
+            baseDir: existingMeta.baseDir, // 强制保留原有的 baseDir
             ...(existingMeta.importedFrom === 'folder'
-              ? { importedFrom: 'folder' }
+              ? { importedFrom: 'folder' } // 如果原本是从文件夹导入的，保留该标记
               : {}),
             ...(existingMeta.importedFrom === 'project-location'
-              ? { importedFrom: 'project-location' }
+              ? { importedFrom: 'project-location' } // 如果原本是从项目位置导入的，保留该标记
               : {}),
             ...(typeof existingMeta.projectLocationId === 'string'
-              ? { projectLocationId: existingMeta.projectLocationId }
+              ? { projectLocationId: existingMeta.projectLocationId } // 保留项目位置 ID
               : {}),
             ...(existingMeta.fromTrustedPicker === true
-              ? { fromTrustedPicker: true as const }
+              ? { fromTrustedPicker: true as const } // 保留受信任选择器标记
               : {}),
             ...(existingMeta.orchestratorWorkspace
-              ? { orchestratorWorkspace: existingMeta.orchestratorWorkspace }
+              ? { orchestratorWorkspace: existingMeta.orchestratorWorkspace } // 保留编排器工作区配置
               : {}),
           };
         } else if ('baseDir' in patch.metadata) {
-          // Non-imported project trying to acquire a baseDir → reject (only
-          // /api/import/folder can set it).
+          // 非导入项目试图获取 baseDir → 拒绝（只有 /api/import/folder 可以设置它）
           return sendApiError(
             res, 400, 'BAD_REQUEST',
             'baseDir can only be set via POST /api/import/folder',
           );
         } else if ('orchestratorWorkspace' in patch.metadata) {
+          // 非导入项目试图设置 orchestratorWorkspace → 拒绝
           return sendApiError(
             res, 400, 'BAD_REQUEST',
             'orchestratorWorkspace can only be set via POST /api/import/folder or POST /api/projects/:id/working-dir',
           );
         }
       }
+      
+      // 如果补丁中包含 linkedDirs 字段
       if (patch.metadata?.linkedDirs) {
-        const existing = getProject(db, req.params.id);
-        const validated = validateLinkedDirs(patch.metadata.linkedDirs);
+        const existing = getProject(db, req.params.id); // 获取项目现有数据
+        const validated = validateLinkedDirs(patch.metadata.linkedDirs); // 验证链接目录的合法性
         if (validated.error) {
+          // 链接目录验证失败，返回错误
           return sendApiError(res, 400, 'INVALID_LINKED_DIR', validated.error);
         }
+        // 如果是受信任选择器设置的项目，直接使用原始值；否则使用验证清理后的值
         patch.metadata.linkedDirs =
           existing?.metadata?.fromTrustedPicker === true
-            ? patch.metadata.linkedDirs
-            : validated.dirs;
+            ? patch.metadata.linkedDirs // 受信任来源，保留原始值
+            : validated.dirs; // 非受信任来源，使用经过清理的值
       }
+      
+      // 验证 customInstructions 字段的类型
       if (patch.customInstructions !== undefined
           && typeof patch.customInstructions !== 'string'
           && patch.customInstructions !== null) {
+        // customInstructions 必须是字符串或 null
         return sendApiError(res, 400, 'BAD_REQUEST', 'customInstructions must be a string or null');
       }
+      
+      // 验证 customInstructions 的长度限制（5000 字符）
       if (typeof patch.customInstructions === 'string' && patch.customInstructions.length > 5000) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'customInstructions exceeds 5 000 character limit');
       }
+      
+      // 如果补丁中包含 designSystemId 字段
       if (Object.prototype.hasOwnProperty.call(patch, 'designSystemId')) {
+        // 验证设计系统 ID 的有效性
         const designSystemValidation = await validateProjectDesignSystemId(patch.designSystemId);
         if (!designSystemValidation.ok) {
+          // 设计系统 ID 无效，返回错误
           return sendApiError(
             res,
             400,
-            designSystemValidation.code,
-            designSystemValidation.message,
+            designSystemValidation.code, // 使用验证返回的错误代码
+            designSystemValidation.message, // 使用验证返回的错误消息
           );
         }
+        // 使用验证后的 ID（可能会做规范化处理）
         patch.designSystemId = designSystemValidation.id;
       }
+      
+      // 如果补丁中包含 skillId 字段
       if (Object.prototype.hasOwnProperty.call(patch, 'skillId')) {
+        // 验证技能 ID 的有效性
         const skillValidation = await validateProjectSkillId(patch.skillId);
         if (!skillValidation.ok) {
+          // 技能 ID 无效，返回错误
           return sendApiError(res, 400, skillValidation.code, skillValidation.message);
         }
+        // 使用验证后的 ID
         patch.skillId = skillValidation.id;
       }
+      
+      // 执行项目更新操作
       const project = updateProject(db, req.params.id, patch);
       if (!project)
+        // 如果项目未找到，返回 404 错误
         return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
+      
       /** @type {import('@open-design/contracts').ProjectResponse} */
-      const body = { project };
-      res.json(body);
+      const body = { project }; // 构建响应体
+      res.json(body); // 返回 JSON 格式的项目数据
     } catch (err: any) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err));
+      // 捕获所有未处理的错误
+      sendApiError(res, 400, 'BAD_REQUEST', String(err)); // 返回 400 错误
     }
   });
-
   app.delete('/api/projects/:id', async (req, res) => {
     try {
       dbDeleteProject(db, req.params.id);
@@ -1647,52 +1693,74 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     }
   });
 
-  // SSE stream of file-changed events for a project. Drives preview live-reload.
-  // Receipt of a `file-changed` event triggers a file-list refresh, which
-  // propagates new mtimes through to FileViewer iframes (the URL-load
-  // `?v=${mtime}` cache-bust from PR #384 then reloads the iframe automatically).
-  // Subscribers come and go as users open/close project tabs; the underlying
-  // chokidar watcher is refcounted in project-watchers.ts so we never hold
-  // descriptors for projects no UI is looking at.
+  // 项目的文件变更事件的 SSE（服务器推送事件）流。用于驱动预览页面的实时重载。
+  // 收到 `file-changed` 事件会触发文件列表刷新，
+  // 文件列表刷新会将新的修改时间传播到 FileViewer 的 iframe
+  // （通过 URL 加载参数 `?v=${mtime}` 的缓存破坏机制，该机制来自 PR #384，然后自动重载 iframe）。
+  // 订阅者会随着用户打开/关闭项目标签页而增加/减少；
+  // 底层的 chokidar 文件监听器在 project-watchers.ts 中通过引用计数管理，
+  // 这样我们就不会为 UI 不再查看的项目保留文件描述符。
   app.get('/api/projects/:id/events', (req, res) => {
+    // 检查项目是否存在，如果不存在则返回 404 错误
     if (!getProject(db, req.params.id)) {
-      return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found');
+      return sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'not found'); // 返回项目未找到的错误
     }
-    let sub: any;
+    let sub: any; // 存储文件事件订阅对象，在 cleanup 函数中使用
     try {
+      // 创建 SSE 响应对象，设置正确的响应头（Content-Type: text/event-stream 等）
       const sse = createSseResponse(res);
+      
+      // 定义项目事件接收器（sink）：当有项目事件时，通过 SSE 发送出去
       const projectEventSink = (payload: any) => {
-        sse.send(payload.type, payload);
+        sse.send(payload.type, payload); // 将事件类型和载荷通过 SSE 发送给客户端
       };
+      
+      // 获取该项目的活跃事件接收器集合，如果不存在则创建一个新的 Set
       let sinks = activeProjectEventSinks.get(req.params.id);
       if (!sinks) {
-        sinks = new Set();
-        activeProjectEventSinks.set(req.params.id, sinks);
+        sinks = new Set(); // 使用 Set 存储多个接收器，支持多个标签页同时订阅
+        activeProjectEventSinks.set(req.params.id, sinks); // 将接收器集合关联到项目 ID
       }
-      sinks.add(projectEventSink);
+      sinks.add(projectEventSink); // 将当前连接的接收器加入集合
+      
+      // 获取项目对象，用于提取元数据信息
       const watchProject = getProject(db, req.params.id);
+      
+      // 订阅文件系统事件，使用 chokidar 监听项目目录的文件变更
       sub = subscribeFileEvents(PROJECTS_DIR, req.params.id, (evt: any) => {
+        // 当文件发生变更时，向客户端发送 'file-changed' 事件
         sse.send('file-changed', evt);
-      }, { metadata: watchProject?.metadata });
+      }, { metadata: watchProject?.metadata }); // 传入项目元数据，可能影响监听行为
+      
+      // 当文件监听器准备就绪时，向客户端发送 'ready' 事件表示可以开始接收变更通知
       sub.ready.then(() => sse.send('ready', { projectId: req.params.id })).catch(() => {});
+      
+      // 定义清理函数，在连接关闭时执行
       const cleanup = () => {
         if (sub) {
+          // 从订阅对象中提取 unsubscribe 方法
           const { unsubscribe } = sub;
-          sub = null;
-          Promise.resolve(unsubscribe()).catch(() => {});
+          sub = null; // 清空引用，防止重复调用
+          Promise.resolve(unsubscribe()).catch(() => {}); // 异步取消文件监听订阅，忽略可能的错误
         }
+        // 从活跃接收器集合中移除当前连接的接收器
         const currentSinks = activeProjectEventSinks.get(req.params.id);
         currentSinks?.delete(projectEventSink);
+        // 如果该项目不再有活跃的接收器，删除整个条目以释放内存
         if (currentSinks?.size === 0) activeProjectEventSinks.delete(req.params.id);
       };
+      
+      // 注册清理监听器：当 HTTP 响应关闭时触发清理
       res.on('close', cleanup);
+      // 注册清理监听器：当 HTTP 响应完成时也触发清理（双重保险）
       res.on('finish', cleanup);
     } catch (err: any) {
-      if (sub) Promise.resolve(sub.unsubscribe()).catch(() => {});
+      // 捕获初始化过程中的错误
+      if (sub) Promise.resolve(sub.unsubscribe()).catch(() => {}); // 如果已经创建了订阅，取消它
+      // 如果响应头尚未发送，返回 400 错误给客户端
       if (!res.headersSent) sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
     }
   });
-
   // ---- Conversations --------------------------------------------------------
 
   app.get('/api/projects/:id/conversations', (req, res) => {
@@ -2252,10 +2320,10 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
     );
   }
 
-  // Project files. Each project owns a flat folder under .od/projects/<id>/
-  // containing every file the user has uploaded, pasted, sketched, or that
-  // the agent has generated. Names are sanitized; paths are confined to the
-  // project's own folder (see apps/daemon/src/projects.ts).
+  // 项目文件。每个项目在 .od/projects/<id>/ 下拥有一个平级文件夹，
+  // 其中包含用户上传、粘贴、手绘或代理生成的所有文件。
+  // 文件名经过清理；路径被限制在项目自身的文件夹内
+  //（参见 apps/daemon/src/projects.ts）。
   app.get('/api/projects/:id/files', async (req, res) => {
     try {
       const since = Number(req.query?.since);

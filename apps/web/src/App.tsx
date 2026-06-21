@@ -1330,217 +1330,230 @@ function AppInner() {
   }, [refreshAgents, restartAmrPolling]);
 
   const handleCreateProject = useCallback(
-    async (
-      input: CreateInput & {
-        pendingPrompt?: string;
-        pluginId?: string;
-        pluginType?: string;
-        appliedPluginSnapshotId?: string;
-        pluginInputs?: Record<string, unknown>;
-        conversationMode?: ChatSessionMode;
-        autoSendFirstMessage?: boolean;
-        requestId?: string;
-        pendingFiles?: File[];
-        userWorkingDirToken?: string;
-      },
-    ): Promise<boolean> => {
-      // Honor an explicit `null` design system — the create panel defaults
-      // to "None" for every kind now, and the user expects that to land
-      // as a no-design-system project rather than silently inheriting the
-      // workspace default.
-      const derivedPendingPrompt =
-      input.pendingPrompt ??
-      (input.metadata?.promptTemplate?.prompt?.trim() || undefined);
-
-      const kind = input.metadata?.kind ?? null;
-      const fidelity = fidelityToTracking(input.metadata?.fidelity ?? null);
-      const creationSource: 'blank' | 'template' | 'zip' | 'folder' =
-        kind === 'template' ? 'template' : 'blank';
-      let result;
-      try {
-        result = await createProject({
-          name: input.name,
-          skillId: input.skillId,
-          designSystemId: input.designSystemId,
-          pendingPrompt: derivedPendingPrompt,
-          metadata: input.metadata,
-          ...(input.conversationMode ? { conversationMode: input.conversationMode } : {}),
-          ...(input.pluginId ? { pluginId: input.pluginId } : {}),
-          ...(input.appliedPluginSnapshotId
-            ? { appliedPluginSnapshotId: input.appliedPluginSnapshotId }
-            : {}),
-          ...(input.pluginInputs ? { pluginInputs: input.pluginInputs } : {}),
-        });
-      } catch (err) {
-        const errorCode =
-          err instanceof Error && err.message.trim()
-            ? err.message
-            : 'CREATE_REQUEST_FAILED';
-        trackProjectCreateResult(
-          analytics.track,
-          {
-            page_name: 'home',
-            area: 'new_project',
-            project_source: 'create_button',
-            project_id: null,
-            project_kind: projectKindToTracking(kind),
-            fidelity,
-            result: 'failed',
-            error_code: errorCode,
-          },
-          { requestId: input.requestId },
-        );
-        throw err;
-      }
-      if (!result) {
-        trackProjectCreateResult(
-          analytics.track,
-          {
-            page_name: 'home',
-            area: 'new_project',
-            project_source: 'create_button',
-            project_id: null,
-            project_kind: projectKindToTracking(kind, input.metadata?.videoModel),
-            fidelity,
-            ...(input.pluginId ? { plugin_id: input.pluginId } : {}),
-            ...(input.pluginType ? { plugin_type: input.pluginType } : {}),
-            result: 'failed',
-            error_code: 'CREATE_REQUEST_FAILED',
-          },
-          { requestId: input.requestId },
-        );
-        return false;
-      }
-      const pendingFiles = Array.isArray(input.pendingFiles)
-        ? input.pendingFiles.filter((file): file is File => file instanceof File)
-        : [];
-      // Flip the project onto the user-picked working directory BEFORE
-      // uploading staged Home attachments. `replaceProjectWorkingDir` changes
-      // `metadata.baseDir`, so the project starts reading from the external
-      // folder. If we uploaded first, the staged files would land in the
-      // temporary managed `.od/projects/<id>` root and then silently vanish
-      // from Design Files and the first auto-send context once the working
-      // dir flips. Doing the handoff first means the initial upload lands in
-      // the final tree.
-      const userWorkingDir = input.metadata?.userWorkingDir;
-      let workingDirHandoffFailed = false;
-      if (userWorkingDir) {
-        try {
-          await replaceProjectWorkingDir(
-            result.project.id,
-            userWorkingDir,
-            input.userWorkingDirToken,
-          );
-        } catch (err) {
-          // The desktop working-dir token is short-lived (~60s TTL); if the
-          // user lingered on Home or the POST was otherwise rejected, the
-          // handoff fails AFTER the project already exists. Do NOT swallow
-          // this and do NOT proceed: uploading staged attachments or
-          // auto-sending the first message would target the managed
-          // `.od/projects/<id>` root the user did not choose. Mark the
-          // handoff as failed so the upload + auto-send branches below are
-          // skipped, then surface a create-time error so the user can
-          // re-pick the working directory from inside the project.
-          console.warn('Failed to set working directory for new project', userWorkingDir, err);
-          workingDirHandoffFailed = true;
-          setWorkingDirError(
-            `Couldn't apply the chosen folder "${userWorkingDir}". The project was created in the default location — re-pick the working directory from the project before uploading files or sending a message.`,
-          );
-        }
-      }
-      let firstMessageAttachments: ChatAttachment[] = [];
-      if (!workingDirHandoffFailed && pendingFiles.length > 0) {
-        // Home composer attaches stay client-side until submit lands a
-        // project; the actual upload happens here. v2 doc wants one
-        // file_upload_result per surface — `page_name='home'` /
-        // `area='chat_composer'` so it's distinguishable from the
-        // file_manager Upload button and the chat_panel composer.
-        const cohort = deriveUploadCohort(pendingFiles);
-        const uploadResult = await uploadProjectFiles(result.project.id, pendingFiles);
-        firstMessageAttachments = uploadResult.uploaded;
-        const partial = uploadResult.failed.length > 0;
-        if (partial) {
-          console.warn('Some Home attachments failed to upload', uploadResult.failed);
-        }
-        trackFileUploadResult(analytics.track, {
-          page_name: 'home',
-          area: 'chat_composer',
-          project_id: result.project.id,
-          ...cohort,
-          result: partial ? 'failed' : 'success',
-          ...(partial && uploadResult.error
-            ? { error_code: uploadResult.error }
-            : {}),
-        });
-      }
-      trackProjectCreateResult(
-        analytics.track,
-        {
-          page_name: 'home',
-          area: 'new_project',
-          project_source: 'create_button',
-          project_id: result.project.id,
-          project_kind: projectKindToTracking(kind, input.metadata?.videoModel),
-          fidelity,
-          ...(input.pluginId ? { plugin_id: input.pluginId } : {}),
-          ...(input.pluginType ? { plugin_type: input.pluginType } : {}),
-          result: 'success',
+      async (
+        input: CreateInput & {
+          pendingPrompt?: string; // 待处理的提示词
+          pluginId?: string; // 插件ID
+          pluginType?: string; // 插件类型
+          appliedPluginSnapshotId?: string; // 已应用的插件快照ID
+          pluginInputs?: Record<string, unknown>; // 插件输入参数
+          conversationMode?: ChatSessionMode; // 对话模式
+          autoSendFirstMessage?: boolean; // 是否自动发送第一条消息
+          requestId?: string; // 请求ID，用于追踪
+          pendingFiles?: File[]; // 待上传的文件列表
+          userWorkingDirToken?: string; // 用户工作目录的访问令牌
         },
-        { requestId: input.requestId },
-      );
-      // PluginLoopHome flow: the user already typed (or accepted) the
-      // first message on Home. Mark this project so ProjectView fires
-      // sendMessage(pendingPrompt) once on mount instead of just
-      // pre-filling the composer. Scoped to sessionStorage so a page
-      // reload after the run has started does not refire.
-      if (
-        !workingDirHandoffFailed &&
-        input.autoSendFirstMessage &&
-        (derivedPendingPrompt !== undefined || firstMessageAttachments.length > 0)
-      ) {
+      ): Promise<boolean> => {
+        // 遵循显式的 `null` 设计体系 —— 创建面板现在每种类型都默认为"无"，
+        // 用户期望这会被视为无设计系统项目，而不是静默继承工作区默认值。
+        // pendingPrompt 就是用户的查询内容
+        const derivedPendingPrompt =
+        input.pendingPrompt ??
+        (input.metadata?.promptTemplate?.prompt?.trim() || undefined);
+        // 获取派生的提示词：优先使用 pendingPrompt，否则从元数据的提示模板中获取
+
+        const kind = input.metadata?.kind ?? null; // 获取项目类型（模板/空白等），默认为 null
+        const fidelity = fidelityToTracking(input.metadata?.fidelity ?? null); // 将保真度转换为追踪格式
+        const creationSource: 'blank' | 'template' | 'zip' | 'folder' =
+          kind === 'template' ? 'template' : 'blank'; // 判断创建来源：模板类型则为 'template'，否则为 'blank'
+        let result; // 存储创建项目的结果
         try {
-          window.sessionStorage.setItem(
-            `od:auto-send-first:${result.project.id}`,
-            '1',
+          // 1. 创建项目
+          result = await createProject({
+            name: input.name, // 项目名称
+            skillId: input.skillId, // 技能ID
+            designSystemId: input.designSystemId, // 设计系统ID
+            pendingPrompt: derivedPendingPrompt, // 待处理的提示词
+            metadata: input.metadata, // 项目元数据
+            ...(input.conversationMode ? { conversationMode: input.conversationMode } : {}), // 如果有对话模式，则传入
+            ...(input.pluginId ? { pluginId: input.pluginId } : {}), // 如果有插件ID，则传入
+            ...(input.appliedPluginSnapshotId
+              ? { appliedPluginSnapshotId: input.appliedPluginSnapshotId }
+              : {}), // 如果有已应用的插件快照ID，则传入
+            ...(input.pluginInputs ? { pluginInputs: input.pluginInputs } : {}), // 如果有插件输入参数，则传入
+          });
+        } catch (err) {
+          // 捕获创建项目时的错误
+          const errorCode =
+            err instanceof Error && err.message.trim()
+              ? err.message
+              : 'CREATE_REQUEST_FAILED'; // 提取错误码，如果是 Error 实例且有消息则使用消息，否则用默认值
+          trackProjectCreateResult(
+            // 追踪项目创建失败事件
+            analytics.track,
+            {
+              page_name: 'home', // 页面名称：首页
+              area: 'new_project', // 区域：新建项目
+              project_source: 'create_button', // 项目来源：创建按钮
+              project_id: null, // 项目ID为空（因为创建失败）
+              project_kind: projectKindToTracking(kind), // 转换项目类型为追踪格式
+              fidelity, // 保真度
+              result: 'failed', // 结果：失败
+              error_code: errorCode, // 错误码
+            },
+            { requestId: input.requestId }, // 传入请求ID用于关联
           );
-          if (firstMessageAttachments.length > 0) {
-            window.sessionStorage.setItem(
-              `od:auto-send-attachments:${result.project.id}`,
-              JSON.stringify(firstMessageAttachments),
-            );
-          } else {
-            window.sessionStorage.removeItem(
-              `od:auto-send-attachments:${result.project.id}`,
-            );
-          }
-        } catch {
-          /* sessionStorage may be unavailable (e.g. SSR / private mode); fall
-             back to manual send. */
+          throw err; // 重新抛出错误
         }
-      }
-      const project = result.appliedPluginSnapshotId
-        ? {
-            ...result.project,
-            appliedPluginSnapshotId: result.appliedPluginSnapshotId,
+        if (!result) {
+          // 如果创建项目返回空结果
+          trackProjectCreateResult(
+            // 追踪项目创建失败事件
+            analytics.track,
+            {
+              page_name: 'home', // 页面名称：首页
+              area: 'new_project', // 区域：新建项目
+              project_source: 'create_button', // 项目来源：创建按钮
+              project_id: null, // 项目ID为空
+              project_kind: projectKindToTracking(kind, input.metadata?.videoModel), // 转换项目类型，包含视频模型信息
+              fidelity, // 保真度
+              ...(input.pluginId ? { plugin_id: input.pluginId } : {}), // 如果有插件ID则附加
+              ...(input.pluginType ? { plugin_type: input.pluginType } : {}), // 如果有插件类型则附加
+              result: 'failed', // 结果：失败
+              error_code: 'CREATE_REQUEST_FAILED', // 错误码：创建请求失败
+            },
+            { requestId: input.requestId }, // 传入请求ID用于关联
+          );
+          return false; // 返回 false 表示创建失败
+        }
+        const pendingFiles = Array.isArray(input.pendingFiles)
+          ? input.pendingFiles.filter((file): file is File => file instanceof File)
+          : []; // 过滤并确保待上传文件列表中的每一项都是有效的 File 实例
+        // 在上传首页暂存的附件之前，先将项目切换到用户选择的工作目录。
+        // `replaceProjectWorkingDir` 会修改 `metadata.baseDir`，
+        // 这样项目就会从外部文件夹开始读取。如果先上传文件，
+        // 暂存的文件会落入临时的托管目录 `.od/projects/<id>` 根路径，
+        // 一旦工作目录切换，这些文件就会从设计文件和首次自动发送的上下文中静默消失。
+        // 先执行目录切换意味着初始上传的文件会直接落入最终的目录树中。
+        const userWorkingDir = input.metadata?.userWorkingDir; // 获取用户指定的工作目录
+        let workingDirHandoffFailed = false; // 标记工作目录切换是否失败
+        if (userWorkingDir) {
+          // 如果用户指定了工作目录
+          try {
+            await replaceProjectWorkingDir(
+              // 替换项目的工作目录
+              result.project.id, // 项目ID
+              userWorkingDir, // 用户选择的工作目录路径
+              input.userWorkingDirToken, // 工作目录访问令牌
+            );
+          } catch (err) {
+            // 桌面端工作目录令牌是短期有效的（约60秒TTL）；
+            // 如果用户在首页停留过久或POST请求被拒绝，
+            // 在项目已创建之后目录切换会失败。
+            // 不要吞掉这个错误，也不要继续执行：
+            // 上传暂存附件或自动发送第一条消息会指向用户未选择的
+            // 托管目录 `.od/projects/<id>` 根路径。
+            // 标记目录切换为失败，这样下面的上传和自动发送分支会被跳过，
+            // 然后向用户展示创建时的错误，让用户可以在项目内部重新选择工作目录。
+            console.warn('无法为新项目设置工作目录', userWorkingDir, err); // 输出警告信息
+            workingDirHandoffFailed = true; // 标记工作目录切换失败
+            setWorkingDirError(
+              // 设置工作目录错误提示信息
+              `无法应用所选文件夹 "${userWorkingDir}"。项目已在默认位置创建 —— 在上传文件或发送消息前，请从项目中重新选择工作目录。`,
+            );
           }
-        : result.project;
-      rememberLocalProject(project.id);
-      flushSync(() => {
-        setProjects((curr) => [
-          project,
-          ...curr.filter((p) => p.id !== project.id),
-        ]);
-      });
-      const projectRoute = {
-        kind: 'project',
-        projectId: project.id,
-        fileName: null,
-      } as const;
-      openWorkspaceTab(projectRoute);
-      navigate(projectRoute);
-      return true;
-    },
-    [analytics.track, rememberLocalProject],
+        }
+        let firstMessageAttachments: ChatAttachment[] = []; // 存储第一条消息的附件列表
+        if (!workingDirHandoffFailed && pendingFiles.length > 0) {
+          // 如果工作目录切换成功且有待上传的文件
+          // 首页编辑器中的附件在提交创建项目之前一直保留在客户端；
+          // 实际上传操作在这里执行。
+          // v2文档要求每个界面一个 file_upload_result ——
+          // `page_name='home'` / `area='chat_composer'`，
+          // 以便与文件管理器的上传按钮和聊天面板编辑器区分开来。
+          const cohort = deriveUploadCohort(pendingFiles); // 根据文件推导上传分类信息
+          const uploadResult = await uploadProjectFiles(result.project.id, pendingFiles); // 上传项目文件
+          firstMessageAttachments = uploadResult.uploaded; // 获取成功上传的文件列表
+          const partial = uploadResult.failed.length > 0; // 判断是否有部分文件上传失败
+          if (partial) {
+            // 如果有部分上传失败
+            console.warn('部分首页附件上传失败', uploadResult.failed); // 输出警告信息
+          }
+          trackFileUploadResult(analytics.track, {
+            // 追踪文件上传结果
+            page_name: 'home', // 页面名称：首页
+            area: 'chat_composer', // 区域：聊天编辑器
+            project_id: result.project.id, // 项目ID
+            ...cohort, // 上传分类信息
+            result: partial ? 'failed' : 'success', // 结果：部分失败则记为失败，否则成功
+            ...(partial && uploadResult.error
+              ? { error_code: uploadResult.error } // 如果有错误则附加错误码
+              : {}),
+          });
+        }
+        trackProjectCreateResult(
+          // 追踪项目创建成功事件
+          analytics.track,
+          {
+            page_name: 'home', // 页面名称：首页
+            area: 'new_project', // 区域：新建项目
+            project_source: 'create_button', // 项目来源：创建按钮
+            project_id: result.project.id, // 项目ID
+            project_kind: projectKindToTracking(kind, input.metadata?.videoModel), // 转换项目类型，包含视频模型信息
+            fidelity, // 保真度
+            ...(input.pluginId ? { plugin_id: input.pluginId } : {}), // 如果有插件ID则附加
+            ...(input.pluginType ? { plugin_type: input.pluginType } : {}), // 如果有插件类型则附加
+            result: 'success', // 结果：成功
+          },
+          { requestId: input.requestId }, // 传入请求ID用于关联
+        );
+        // PluginLoopHome 流程：用户已经在首页输入（或接受）了第一条消息。
+        // 标记此项目，以便 ProjectView 在挂载时执行一次 sendMessage(pendingPrompt)，
+        // 而不是仅仅预填充编辑器。使用 sessionStorage 存储，
+        // 这样运行开始后的页面刷新不会重复触发。
+        if (
+          !workingDirHandoffFailed && // 工作目录切换未失败
+          input.autoSendFirstMessage && // 需要自动发送第一条消息
+          (derivedPendingPrompt !== undefined || firstMessageAttachments.length > 0) // 有待发送的提示词或附件
+        ) {
+          try {
+            window.sessionStorage.setItem(
+              // 在 sessionStorage 中设置自动发送标记
+              `od:auto-send-first:${result.project.id}`, // 键名：项目自动发送标记
+              '1', // 值：'1' 表示需要自动发送
+            );
+            if (firstMessageAttachments.length > 0) {
+              // 如果有附件
+              window.sessionStorage.setItem(
+                // 存储附件信息
+                `od:auto-send-attachments:${result.project.id}`, // 键名：项目自动发送附件
+                JSON.stringify(firstMessageAttachments), // 值：附件的 JSON 字符串
+              );
+            } else {
+              window.sessionStorage.removeItem(
+                // 如果没有附件，则移除附件存储项
+                `od:auto-send-attachments:${result.project.id}`,
+              );
+            }
+          } catch {
+            // sessionStorage 可能不可用（例如 SSR / 隐私模式）；
+            // 降级为手动发送。
+          }
+        }
+        const project = result.appliedPluginSnapshotId
+          ? {
+              ...result.project, // 展开项目对象
+              appliedPluginSnapshotId: result.appliedPluginSnapshotId, // 附加已应用的插件快照ID
+            }
+          : result.project; // 如果没有插件快照ID，直接使用项目对象
+        rememberLocalProject(project.id); // 记住本地项目ID
+        flushSync(() => {
+          // 同步刷新状态更新
+          setProjects((curr) => [
+            project, // 将新项目添加到列表最前面
+            ...curr.filter((p) => p.id !== project.id), // 过滤掉可能重复的旧项目
+          ]);
+        });
+        const projectRoute = {
+          kind: 'project', // 路由类型：项目
+          projectId: project.id, // 项目ID
+          fileName: null, // 文件名（项目路由不需要）
+        } as const;
+        openWorkspaceTab(projectRoute); // 在工作区中打开新标签页
+        navigate(projectRoute); // 导航到项目路由，更新路由对象，触发路由变化
+        return true; // 返回 true 表示创建成功
+      },
+      [analytics.track, rememberLocalProject], // 依赖项：分析追踪函数和记住本地项目的函数
   );
 
   const handleCreatePluginShareProject = useCallback(
@@ -1832,7 +1845,7 @@ function AppInner() {
       createdAt: now,
       updatedAt: now,
     };
-  }, [route]);
+  }, [route]); // 监听路由对象，更新routeProjectPlaceholder，然后更新activeProject，最后渲染ProjectView页面
   const activeProject = loadedActiveProject ?? routeProjectPlaceholder;
 
   // Deep-linked route to a project we don't have yet (e.g. after a refresh
@@ -2115,7 +2128,7 @@ function AppInner() {
         }
       />
     );
-  } else if (activeProject) {
+  } else if (activeProject) { // activateProject变化时渲染ProjectView页面
     appMain = (
       <ProjectView
         key={activeProject.id}

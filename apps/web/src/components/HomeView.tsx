@@ -1455,6 +1455,7 @@ export function HomeView({
   }
 
   async function submit() {
+    // TODO 消息发送按钮
     // The send button disables itself while sending, but the Enter-to-send
     // path lands here directly — swallow re-entry during the in-flight window.
     if (sending) return;
@@ -1582,6 +1583,7 @@ export function HomeView({
         examplePromptInfoRef.current != null && localStorage.getItem(examplePromptKey) == null
           ? examplePromptInfoRef.current
           : null;
+      // TODO 发送消息
       const accepted = await onSubmit({
         prompt: trimmed,
         pluginId: routedPluginId,

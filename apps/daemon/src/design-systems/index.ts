@@ -254,7 +254,7 @@ export type DesignSystemListOptions = {
 };
 
 export async function listDesignSystems(
-  root: string,
+  root: string, // 'D:\\Master\\projects\\github\\open-design\\design-systems'
   options: DesignSystemListOptions = {},
 ): Promise<DesignSystemSummary[]> {
   const out: DesignSystemSummary[] = [];
@@ -264,55 +264,55 @@ export async function listDesignSystems(
   } catch {
     return out;
   }
-  for (const entry of entries) {
+  for (const entry of entries) { // 每个 entry: {name: "agentic",parentPath: "D:\\Master\\projects\\github\\open-design\\design-systems"}
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
     const brandRoot = path.join(root, entry.name);
     const manifest = await readProjectManifest(brandRoot, entry.name);
-    const designPath = path.join(brandRoot, manifest?.files.design ?? 'DESIGN.md');
+    const designPath = path.join(brandRoot, manifest?.files.design ?? 'DESIGN.md'); // "D:\\Master\\projects\\github\\open-design\\design-systems\\agentic\\DESIGN.md"
     try {
       const stats = await stat(designPath);
       if (!stats.isFile()) continue;
       const raw = await readFile(designPath, 'utf8');
       const metadata = await readUserMetadata(root, entry.name);
       const { data: frontmatter, body } = parseFrontmatter(raw);
-      const titleMatch = /^#\s+(.+?)\s*$/m.exec(body);
+      const titleMatch = /^#\s+(.+?)\s*$/m.exec(body); // [`# Design System Inspired by Agentic,"Design System Inspired by Agentic"]
       const markdownTitle =
-        titleMatch?.[1] !== undefined ? cleanTitle(titleMatch[1]) : '';
-      const fallbackTitle = markdownTitle || stringField(frontmatter, 'name') || entry.name;
+        titleMatch?.[1] !== undefined ? cleanTitle(titleMatch[1]) : ''; // 'Agentic'
+      const fallbackTitle = markdownTitle || stringField(frontmatter, 'name') || entry.name; // 'Agentic'
       const title = cleanTitle(
         metadata.title
         ?? manifest?.name
         ?? fallbackTitle,
-      );
+      ); // 'Agentic'
       const frontmatterCategory = stringField(frontmatter, 'category');
       const category = (
         metadata.category
         ?? manifest?.category
         ?? extractCategory(body)
         ?? frontmatterCategory
-      ) || 'Uncategorized';
-      const markdownSummary = summarize(body);
+      ) || 'Uncategorized'; // 'Themed & Unique'，对应 DESIGN.md 中的 category
+      const markdownSummary = summarize(body); // 提取markdown摘要，在 category 的内容的下一页
       const markdownSwatches = extractSwatches(body);
       const frontmatterSwatchRow = swatchesFromFrontmatter(frontmatter);
       const swatches = pickFinalSwatchRow(frontmatterSwatchRow, markdownSwatches);
       out.push({
         id: `${options.idPrefix ?? ''}${entry.name}`,
-        title,
-        category,
+        title, // Agentic
+        category, // "Themed & Unique"
         summary:
           (manifest?.description?.trim() || markdownSummary)
           || stringField(frontmatter, 'description')
-          || '',
-        swatches,
+          || '', // summary 摘要
+        swatches, // ["#ffffff","#f6f6f1","#111827","#ff5701"]
         surface:
           metadata.surface
           ?? extractSurface(body)
           ?? frontmatterSurface(frontmatter)
-          ?? 'web',
-        body: raw,
-        source: options.source ?? 'built-in',
-        status: metadata.status ?? options.defaultStatus ?? 'published',
-        isEditable: options.isEditable ?? false,
+          ?? 'web', // web
+        body: raw, // DESIGN.md 的原始内容
+        source: options.source ?? 'built-in', // built-in
+        status: metadata.status ?? options.defaultStatus ?? 'published', // published
+        isEditable: options.isEditable ?? false, // false
         ...(metadata.createdAt ? { createdAt: metadata.createdAt } : {}),
         ...(metadata.updatedAt ? { updatedAt: metadata.updatedAt } : {}),
         ...(metadata.provenance ? { provenance: metadata.provenance } : {}),

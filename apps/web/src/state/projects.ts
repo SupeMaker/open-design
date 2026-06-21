@@ -82,6 +82,8 @@ export async function createProject(input: {
     // calling it directly throws — the surrounding try/catch then turns
     // the Create button into a silent no-op (issue #849).
     const id = randomUUID();
+    // TODO 发送请求
+    console.log("发送请求", input);
     const resp = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

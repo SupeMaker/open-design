@@ -16,8 +16,13 @@ import path from 'node:path';
 import { writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { assertExternalAssetUrl, assertAndFetchExternalAsset } from './connectionTest.js';
+<<<<<<< Updated upstream
 import { resolveProviderConfig } from './media/config.js';
 import { IMAGE_MODELS } from './media/models.js';
+=======
+import { resolveProviderConfig } from './media-config.js';
+import { IMAGE_MODELS, VIDEO_MODELS } from './media-models.js';
+>>>>>>> Stashed changes
 import { ensureProject } from './projects.js';
 import {
   AIHUBMIX_DEFAULT_BASE_URL,
@@ -99,6 +104,58 @@ export const BYOK_AIHUBMIX_DEFAULT_SPEECH_MODEL = 'aihubmix-tts-1';
 
 const AIHUBMIX_DEFAULT_TTS_MODEL = 'tts-1';
 const AIHUBMIX_DEFAULT_TTS_VOICE = 'alloy';
+
+// Agnes image/video model allowlists — same registry-derived pattern as
+// SenseAudio so a new `provider: 'agnes'` entry in media-models auto-extends
+// the chat tool enum and daemon-side validation.
+export const BYOK_AGNES_IMAGE_MODELS: readonly string[] = IMAGE_MODELS
+  .filter((m) => m.provider === 'agnes' && m.id.startsWith('agnes-image-'))
+  .map((m) => m.id);
+
+export const BYOK_AGNES_DEFAULT_IMAGE_MODEL =
+  BYOK_AGNES_IMAGE_MODELS[0] ?? 'agnes-image-2.1-flash';
+
+export const BYOK_AGNES_VIDEO_MODELS: readonly string[] = VIDEO_MODELS
+  .filter((m) => m.provider === 'agnes' && m.id.startsWith('agnes-video-'))
+  .map((m) => m.id);
+
+export const BYOK_AGNES_DEFAULT_VIDEO_MODEL =
+  BYOK_AGNES_VIDEO_MODELS[0] ?? 'agnes-video-v2.0';
+
+export function isAgnesImageModel(value: unknown): value is string {
+  return typeof value === 'string' && BYOK_AGNES_IMAGE_MODELS.includes(value);
+}
+
+export function isAgnesVideoModel(value: unknown): value is string {
+  return typeof value === 'string' && BYOK_AGNES_VIDEO_MODELS.includes(value);
+}
+
+const AGNES_DEFAULT_BASE_URL = 'https://apihub.agnes-ai.com';
+
+// Agnes image aspect → pixel size. Mirrors agnesImageSize in media.ts.
+const AGNES_IMAGE_ASPECT_TO_SIZE: Record<string, string> = {
+  '1:1': '1024x1024',
+  '16:9': '1024x768',
+  '9:16': '768x1024',
+  '4:3': '1024x768',
+  '3:4': '768x1024',
+};
+
+// Agnes video dimensions. Mirrors agnesVideoDimensions in media.ts.
+const AGNES_VIDEO_ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
+const AGNES_VIDEO_ASPECT_TO_SIZE: Record<string, string> = {
+  '16:9': '1152x768',
+  '9:16': '768x1152',
+  '1:1': '1024x1024',
+  '4:3': '1024x768',
+  '3:4': '768x1024',
+};
+const AGNES_VIDEO_DURATION_MIN = 3;
+const AGNES_VIDEO_DURATION_MAX = 18;
+const AGNES_VIDEO_DURATION_DEFAULT = 5;
+const AGNES_VIDEO_POLL_INTERVAL_MS_DEFAULT = 5000;
+const AGNES_VIDEO_MAX_POLLS = 144;
+const AGNES_VIDEO_PROGRESS_LOG_EVERY = 6;
 
 // AIHubMix video knobs for the chat `generate_video` tool. The wire shape
 // mirrors renderAIHubMixVideo (media.ts): POST /videos → poll /videos/{id} →
@@ -387,6 +444,94 @@ export const BYOK_AIHUBMIX_TOOLS = [
             type: 'string',
             description:
               'Reference image for image-to-video (i2v) models — the first frame / character the video animates. Pass the daemon file URL of an image already in this project (e.g. an uploaded reference or a previously generated image, like /api/projects/<id>/files/<name>.png). REQUIRED when the selected model is an i2v model (its id contains "i2v"); for those models, if you omit it the daemon falls back to the most recent image in the project.',
+          },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+];
+
+/**
+ * OpenAI-compatible tool definitions injected into /api/proxy/agnes/stream.
+ * Agnes exposes OpenAI-shaped image (/v1/images/generations) and video
+ * (/v1/videos submit → /agnesapi poll) endpoints, so the BYOK chat gets
+ * the same generate_image + generate_video surface as the other gateways.
+ */
+export const BYOK_AGNES_TOOLS = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'generate_image',
+      description:
+        'Generate an image from a text prompt using Agnes image models (agnes-image-2.0-flash / agnes-image-2.1-flash). Returns a URL pointing to the rendered PNG. After this tool succeeds, embed the URL in your reply with markdown image syntax — ![alt](url) — so the user sees the image inline. Use this whenever the user asks to draw, create, generate, design, or illustrate something visual.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description:
+              'Detailed visual description of the image (Chinese or English are both fine). Include subject, style, lighting, composition. Maximum 2000 characters.',
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+            description:
+              'Output aspect ratio. 1:1 for square avatars and product shots, 16:9 for hero banners, 9:16 for vertical phone posters, 4:3 for editorial covers, 3:4 for posters. Defaults to 1:1 when omitted.',
+          },
+          model: {
+            type: 'string',
+            enum: [...BYOK_AGNES_IMAGE_MODELS],
+            description:
+              'Optional model override. Omit this to use the user-configured default from Settings (agnes-image-2.1-flash when unset).',
+          },
+          image_url: {
+            type: 'string',
+            description:
+              'Reference image for image-to-image generation. Pass the daemon file URL of an image already in this project (e.g. an uploaded reference or a previously generated image, like /api/projects/<id>/files/<name>.png). Omit for text-to-image.',
+          },
+        },
+        required: ['prompt'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'generate_video',
+      description:
+        'Generate a short video (3–18 seconds) from a text prompt using Agnes Video V2.0. This is an asynchronous call that can take 30 s to a few minutes — the daemon polls the job for you, so the user just sees the chat waiting. After this tool succeeds, embed the returned URL in your reply as a markdown link, e.g. `[▶ Play video](url)`, because the chat\'s markdown renderer does not currently render `<video>` tags inline. Use this whenever the user asks for a video, clip, animation, or motion graphic.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description:
+              'Detailed motion description of the video. Include subject, action / camera move / scene transitions, style, lighting. Chinese or English. Maximum 2000 characters.',
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: [...AGNES_VIDEO_ASPECT_RATIOS],
+            description:
+              'Output aspect ratio. 16:9 for cinematic, 9:16 for vertical (phone / TikTok), 1:1 for social square, 4:3 / 3:4 for editorial. Defaults to 16:9.',
+          },
+          duration: {
+            type: 'integer',
+            minimum: AGNES_VIDEO_DURATION_MIN,
+            maximum: AGNES_VIDEO_DURATION_MAX,
+            description:
+              `Video length in seconds (integer). Allowed range ${AGNES_VIDEO_DURATION_MIN}–${AGNES_VIDEO_DURATION_MAX}; defaults to ${AGNES_VIDEO_DURATION_DEFAULT}. Shorter durations finish faster.`,
+          },
+          model: {
+            type: 'string',
+            enum: [...BYOK_AGNES_VIDEO_MODELS],
+            description:
+              'Optional model override. Omit this to use the user-configured default from Settings (agnes-video-v2.0 when unset).',
+          },
+          image_url: {
+            type: 'string',
+            description:
+              'Reference image for image-to-video — the first frame the video animates. Pass the daemon file URL of an image already in this project. Omit for text-to-video.',
           },
         },
         required: ['prompt'],
@@ -1305,7 +1450,7 @@ async function fileToImagePart(filePath: string): Promise<ReferenceImagePart | n
 // http(s) URL. Project-local files are read straight off disk (basename-only,
 // so a crafted path can't escape the project dir); external URLs are
 // SSRF-checked then fetched.
-async function resolveAIHubMixReferenceImage(
+async function resolveProjectReferenceImage(
   imageUrl: unknown,
   dir: string,
   ctx: BYOKToolContext,
@@ -1476,7 +1621,7 @@ export async function executeAIHubMixGenerateVideo(
   //     accept an optional reference but never require one.
   const requiresReference = wireModel.toLowerCase().includes('i2v');
   const acceptsReference = cap.caps.includes('i2v');
-  let refImage = await resolveAIHubMixReferenceImage(args.image_url, dir, ctx);
+  let refImage = await resolveProjectReferenceImage(args.image_url, dir, ctx);
   if (!refImage && requiresReference) {
     refImage = await newestProjectImagePart(dir);
     if (refImage) {
@@ -1679,6 +1824,333 @@ export async function executeAIHubMixGenerateVideo(
     };
   }
   if (bytes.length === 0) return { ok: false, error: 'aihubmix video returned zero bytes' };
+
+  const id = `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const filename = `byok-video-${id}.mp4`;
+  await writeFile(path.join(dir, filename), bytes);
+  return {
+    ok: true,
+    url: `/api/projects/${encodeURIComponent(ctx.projectId)}/files/${filename}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Agnes tool executors (OpenAI-wire-compatible image + video gateway).
+// ---------------------------------------------------------------------------
+
+function agnesApiBase(baseUrl: string): string {
+  // Agnes image/video endpoints live under /v1, while the status poll is at
+  // /agnesapi. Strip a trailing /v1 (and any slashes) so callers can append
+  // the correct path regardless of whether the saved base URL includes /v1.
+  return baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '');
+}
+
+function sanitizeAgnesImageAspect(raw: unknown): string {
+  return typeof raw === 'string' && AGNES_IMAGE_ASPECT_TO_SIZE[raw] ? raw : '1:1';
+}
+
+function sanitizeAgnesVideoAspect(raw: unknown): string {
+  return typeof raw === 'string' && AGNES_VIDEO_ASPECT_TO_SIZE[raw] ? raw : '16:9';
+}
+
+function sanitizeAgnesVideoDuration(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return AGNES_VIDEO_DURATION_DEFAULT;
+  const rounded = Math.round(raw);
+  if (rounded < AGNES_VIDEO_DURATION_MIN) return AGNES_VIDEO_DURATION_MIN;
+  if (rounded > AGNES_VIDEO_DURATION_MAX) return AGNES_VIDEO_DURATION_MAX;
+  return rounded;
+}
+
+function agnesVideoSizeFor(aspect: string): { width: number; height: number } {
+  switch (aspect) {
+    case '9:16':
+      return { width: 720, height: 1280 };
+    case '1:1':
+      return { width: 1024, height: 1024 };
+    case '4:3':
+      return { width: 1024, height: 768 };
+    case '3:4':
+      return { width: 768, height: 1024 };
+    case '16:9':
+    default:
+      return { width: 1152, height: 768 };
+  }
+}
+
+// Agnes requires num_frames ≤ 441 and num_frames = 8n + 1. Pick the nearest
+// valid frame count for the requested duration at 24 fps.
+function agnesVideoFramesForLength(seconds: number): number {
+  const frames = Math.round(seconds * 24);
+  const clamped = Math.min(441, Math.max(9, frames));
+  const n = Math.round((clamped - 1) / 8);
+  return Math.min(441, Math.max(9, n * 8 + 1));
+}
+
+async function resolveAgnesCredentials(
+  ctx: BYOKToolContext,
+): Promise<{ apiKey: string; baseUrl: string }> {
+  let apiKey = ctx.upstreamApiKey;
+  let baseUrl = ctx.upstreamBaseUrl || AGNES_DEFAULT_BASE_URL;
+  if (!apiKey) {
+    const resolved = await resolveProviderConfig(ctx.projectRoot, 'agnes');
+    apiKey = resolved.apiKey || '';
+    if (resolved.baseUrl) baseUrl = resolved.baseUrl;
+  }
+  return { apiKey, baseUrl };
+}
+
+export async function executeAgnesGenerateImage(
+  args: { prompt?: unknown; aspect_ratio?: unknown; model?: unknown; image_url?: unknown },
+  ctx: BYOKToolContext,
+): Promise<ImageToolResult> {
+  const promptRaw = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+  if (!promptRaw) return { ok: false, error: 'prompt is required' };
+  const prompt =
+    promptRaw.length > PROMPT_MAX_LENGTH ? promptRaw.slice(0, PROMPT_MAX_LENGTH) : promptRaw;
+
+  const aspect = sanitizeAgnesImageAspect(args.aspect_ratio);
+  const size = AGNES_IMAGE_ASPECT_TO_SIZE[aspect];
+
+  const catalogModel = isAgnesImageModel(ctx.defaultImageModel)
+    ? ctx.defaultImageModel
+    : isAgnesImageModel(args.model)
+      ? args.model
+      : BYOK_AGNES_DEFAULT_IMAGE_MODEL;
+
+  let dir: string;
+  try {
+    dir = await ensureProject(ctx.projectsRoot, ctx.projectId);
+  } catch (err) {
+    return {
+      ok: false,
+      error: `invalid projectId for image storage: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const { apiKey, baseUrl } = await resolveAgnesCredentials(ctx);
+  if (!apiKey) return { ok: false, error: 'no Agnes API key available' };
+  const root = agnesApiBase(baseUrl);
+
+  const refImage = await resolveProjectReferenceImage(args.image_url, dir, ctx);
+
+  console.log(
+    `[proxy:agnes] generate_image submit POST ${root}/v1/images/generations model=${catalogModel} size=${size} ref=${refImage ? 'yes' : 'no'}`,
+  );
+
+  const body: Record<string, unknown> = {
+    model: catalogModel,
+    prompt,
+    size,
+    extra_body: { response_format: 'url' },
+  };
+  if (refImage) {
+    body.image = [`data:${refImage.mime};base64,${refImage.bytes.toString('base64')}`];
+  }
+
+  let bytes: Buffer;
+  try {
+    const resp = await fetch(`${root}/v1/images/generations`, withToolRequestInit(ctx, {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }));
+    const text = await resp.text();
+    if (!resp.ok) {
+      return { ok: false, error: `agnes image ${resp.status}: ${text.slice(0, 240)}` };
+    }
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return { ok: false, error: `agnes image non-JSON: ${text.slice(0, 200)}` };
+    }
+    const entry = data && Array.isArray(data.data) ? data.data[0] : null;
+    if (!entry) return { ok: false, error: 'agnes image response had no data[0]' };
+
+    if (typeof entry.b64_json === 'string' && entry.b64_json) {
+      const raw = entry.b64_json.includes(',')
+        ? entry.b64_json.slice(entry.b64_json.indexOf(',') + 1)
+        : entry.b64_json;
+      bytes = Buffer.from(raw, 'base64');
+    } else if (typeof entry.url === 'string' && entry.url) {
+      const imgResp = await assertAndFetchExternalAsset(entry.url, withToolRequestInit(ctx, {}));
+      if (!imgResp.ok) return { ok: false, error: `agnes image fetch ${imgResp.status}` };
+      bytes = Buffer.from(await imgResp.arrayBuffer());
+    } else {
+      return { ok: false, error: 'agnes image response had neither b64_json nor url' };
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  if (bytes.length === 0) return { ok: false, error: 'agnes image returned zero bytes' };
+
+  const id = `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
+  const filename = `byok-${id}.png`;
+  await writeFile(path.join(dir, filename), bytes);
+  return {
+    ok: true,
+    url: `/api/projects/${encodeURIComponent(ctx.projectId)}/files/${filename}`,
+  };
+}
+
+export async function executeAgnesGenerateVideo(
+  args: {
+    prompt?: unknown;
+    aspect_ratio?: unknown;
+    duration?: unknown;
+    model?: unknown;
+    image_url?: unknown;
+  },
+  ctx: BYOKToolContext,
+): Promise<ImageToolResult> {
+  const promptRaw = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+  if (!promptRaw) return { ok: false, error: 'prompt is required' };
+  const prompt =
+    promptRaw.length > PROMPT_MAX_LENGTH ? promptRaw.slice(0, PROMPT_MAX_LENGTH) : promptRaw;
+
+  const aspect = sanitizeAgnesVideoAspect(args.aspect_ratio);
+  const { width, height } = agnesVideoSizeFor(aspect);
+  const duration = sanitizeAgnesVideoDuration(args.duration);
+  const numFrames = agnesVideoFramesForLength(duration);
+  const frameRate = 24;
+
+  const catalogModel = isAgnesVideoModel(ctx.defaultVideoModel)
+    ? ctx.defaultVideoModel
+    : isAgnesVideoModel(args.model)
+      ? args.model
+      : BYOK_AGNES_DEFAULT_VIDEO_MODEL;
+
+  let dir: string;
+  try {
+    dir = await ensureProject(ctx.projectsRoot, ctx.projectId);
+  } catch (err) {
+    return {
+      ok: false,
+      error: `invalid projectId for video storage: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const { apiKey, baseUrl } = await resolveAgnesCredentials(ctx);
+  if (!apiKey) return { ok: false, error: 'no Agnes API key available' };
+  const root = agnesApiBase(baseUrl);
+
+  const refImage = await resolveProjectReferenceImage(args.image_url, dir, ctx);
+
+  const body: Record<string, unknown> = {
+    model: catalogModel,
+    prompt,
+    width,
+    height,
+    num_frames: numFrames,
+    frame_rate: frameRate,
+  };
+  if (refImage) {
+    body.image = `data:${refImage.mime};base64,${refImage.bytes.toString('base64')}`;
+  }
+
+  console.log(
+    `[proxy:agnes] generate_video submit POST ${root}/v1/videos model=${catalogModel} ${width}x${height} frames=${numFrames} ref=${refImage ? 'yes' : 'no'}`,
+  );
+
+  let videoId: string;
+  try {
+    const submitResp = await fetch(`${root}/v1/videos`, withToolRequestInit(ctx, {
+      method: 'POST',
+      redirect: 'error',
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }));
+    const submitText = await submitResp.text();
+    if (!submitResp.ok) {
+      return { ok: false, error: `agnes video submit ${submitResp.status}: ${submitText.slice(0, 240)}` };
+    }
+    let submitData: any;
+    try {
+      submitData = JSON.parse(submitText);
+    } catch {
+      return { ok: false, error: `agnes video non-JSON: ${submitText.slice(0, 200)}` };
+    }
+    const id = submitData?.video_id || submitData?.id;
+    if (typeof id !== 'string' || !id) {
+      return { ok: false, error: 'agnes video response missing video_id' };
+    }
+    videoId = id;
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  const pollIntervalMs = ctx.videoPollIntervalMs ?? AGNES_VIDEO_POLL_INTERVAL_MS_DEFAULT;
+  let videoUrl = '';
+  for (let attempt = 0; attempt < AGNES_VIDEO_MAX_POLLS; attempt++) {
+    await sleep(pollIntervalMs);
+    let pollResp: Response;
+    try {
+      pollResp = await fetch(
+        `${root}/agnesapi?video_id=${encodeURIComponent(videoId)}`,
+        withToolRequestInit(ctx, {
+          method: 'GET',
+          headers: { authorization: `Bearer ${apiKey}` },
+        }),
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        error: `agnes video poll failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    const pollText = await pollResp.text();
+    if (!pollResp.ok) {
+      return { ok: false, error: `agnes video poll ${pollResp.status}: ${pollText.slice(0, 240)}` };
+    }
+    let pollData: any;
+    try {
+      pollData = JSON.parse(pollText);
+    } catch {
+      return { ok: false, error: `agnes video poll non-JSON: ${pollText.slice(0, 200)}` };
+    }
+    const status = pollData?.status || '';
+    if (status === 'completed') {
+      const url = pollData?.remixed_from_video_id || pollData?.video_url || '';
+      if (typeof url !== 'string' || !url) {
+        return { ok: false, error: 'agnes video status completed but missing video_url' };
+      }
+      videoUrl = url;
+      break;
+    }
+    if (status === 'failed') {
+      const reason = pollData?.error?.message || pollData?.error || 'unknown';
+      return { ok: false, error: `agnes video failed: ${reason}`.slice(0, 240) };
+    }
+    if ((attempt + 1) % AGNES_VIDEO_PROGRESS_LOG_EVERY === 0) {
+      console.log(
+        `[proxy:agnes] generate_video poll ${attempt + 1}/${AGNES_VIDEO_MAX_POLLS} task=${videoId} status=${status || 'pending'}`,
+      );
+    }
+  }
+  if (!videoUrl) {
+    return { ok: false, error: `agnes video timed out after ${AGNES_VIDEO_MAX_POLLS} polls` };
+  }
+
+  console.log(`[proxy:agnes] generate_video completed task=${videoId} download=${videoUrl}`);
+  let bytes: Buffer;
+  try {
+    const dl = await assertAndFetchExternalAsset(videoUrl, withToolRequestInit(ctx, {}));
+    if (!dl.ok) return { ok: false, error: `agnes video fetch ${dl.status}` };
+    bytes = Buffer.from(await dl.arrayBuffer());
+  } catch (err) {
+    return {
+      ok: false,
+      error: `agnes video download failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (bytes.length === 0) return { ok: false, error: 'agnes video returned zero bytes' };
 
   const id = `${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`;
   const filename = `byok-video-${id}.mp4`;
