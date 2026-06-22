@@ -103,6 +103,7 @@ import type { PluginUseAction } from './plugins-home/useActions';
 import { Icon } from './Icon';
 import { AgentIcon } from './AgentIcon';
 import { LanguageMenu } from './LanguageMenu';
+import { AvatarMenu } from './AvatarMenu';
 import { IntegrationsView, type IntegrationTab } from './IntegrationsView';
 import { InlineModelSwitcher } from './InlineModelSwitcher';
 import {
