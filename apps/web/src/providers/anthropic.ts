@@ -73,6 +73,7 @@ export async function streamMessage(
     cfg.apiProtocol === 'agnes' ||
     (!cfg.apiProtocol && isOpenAICompatible(cfg.model, cfg.baseUrl))
   ) {
+    // TODO 发送消息到OpenAI API
     return streamMessageOpenAI(cfg, system, history, signal, handlers);
   }
 

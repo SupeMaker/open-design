@@ -979,7 +979,22 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
 
   app.post('/api/proxy/openai/stream', async (req, res) => {
     /** @type {Partial<ProxyStreamRequest>} */
-    const proxyBody = req.body || {};
+    /*
+    apiKey: xxx.
+    apiVersion: '',
+    baseUrl = http://127.0.01:11565/v1,
+    maxTokens: 8192,
+    messages: [
+      {
+        role: "user",
+        content: "沉浸式单页视差落地页：粘性视口随滚动将传送门图像放大推近，入场时帷幕滑开，第二幕以弧形卡片滑块展示九个梦境世界。",
+      }
+    ],
+    model: "qwen3.5-2b",
+    systemPrompt: xxx
+    */
+    const proxyBody = req.body || {}; 
+    console.log('proxyBody: ', proxyBody);
     if (rejectProxyPluginContext(proxyBody, res)) return;
     const { baseUrl, apiKey, model, systemPrompt, messages, maxTokens } =
       proxyBody;
@@ -1010,7 +1025,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     });
     if (reasoningDenial) return sendReasoningEgressDenial(res, reasoningDenial);
 
-    const url = appendVersionedApiPath(baseUrl, '/chat/completions');
+    const url = appendVersionedApiPath(baseUrl, '/chat/completions'); // "http://127.0.0.1:11565/v1/chat/completions"
     console.log(
       `[proxy:openai] ${req.method} ${validated.parsed!.hostname} model=${model}`,
     );
