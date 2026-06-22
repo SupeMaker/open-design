@@ -4238,6 +4238,7 @@ export function ProjectView({
       };
       // 守护进程模式：通过本地代理处理消息
       if (config.mode === 'daemon') {
+        console.log("daemon, 守护进程模式")
         // 如果没有选择代理，抛出错误并终止
         if (!config.agentId) {
           handlers.onError(new Error('Pick a local agent first (top bar).')); // 提示用户先在顶部栏选择本地代理
@@ -4404,6 +4405,7 @@ export function ProjectView({
         // 运行"与聊天相同"的内存提取。守护进程本身从不持久化BYOK凭证，因此此每次调用的信号是
         // pickProvider()在没有设置显式内存模型覆盖时避免回退到环境/媒体配置（这对BYOK来说是错误的）的唯一方式。
         // 当聊天配置变化时，选择器会重新同步显式覆盖；此快照覆盖隐式的"与聊天相同"默认值
+        // TODO 网页聊天进入这个模式
         const byokChatProvider =
           config.apiProtocol && config.apiKey // 如果配置了API协议和密钥
             ? {
@@ -4436,7 +4438,7 @@ export function ProjectView({
           }
         }
         
-        // 获取组合后的系统提示词
+        // 1. 获取组合后的系统提示词
         const systemPrompt = await composedSystemPrompt(runSessionMode);
         
         // 构建包含附件上下文的API历史消息列表
@@ -4453,12 +4455,15 @@ export function ProjectView({
         
         // 推送请求状态事件，显示正在请求的模型
         pushEvent({ kind: 'status', label: 'requesting', detail: config.model });
-        // BYOK runs stream client-side and never reach the daemon, so the
-        // daemon's authoritative run_created/run_finished are never emitted for
-        // them. Emit them here so BYOK runs are counted in the run funnel; the
-        // `runtime_type='byok'` rides on these events from the registered
-        // super-property. The run id is client-generated (there is no daemon
-        // run record). See analytics/byok-run.ts.
+        // BYOK 运行在客户端侧执行，数据永远不会到达守护进程，因此守护进程的权威 run_created/run_finished 事件永远不会为它们触发。
+        // 在此处手动触发这些事件，以便 BYOK 运行能够被计入运行漏斗统计中；
+        // `runtime_type='byok'` 会作为注册的超级属性附加在这些事件上。
+        // 运行 ID 由客户端生成（守护进程中没有对应的运行记录）。
+        // 参见 analytics/byok-run.ts。
+        /*
+        这段代码是 BYOK（Bring Your Own Key）运行分析追踪的实现，主要作用是在客户端手动模拟守护进程的运行生命周期事件，以便 BYOK 运行能够被正确计入后台的分析漏斗。
+        为 BYOK 运行手动生成 run_created 和 run_finished 分析事件，弥补守护进程无法为这类运行自动触发事件的缺失。
+        */
         const byokRunId = randomUUID();
         const byokRunBase = {
           projectId: project.id,
@@ -4466,17 +4471,17 @@ export function ProjectView({
           runId: byokRunId,
           projectKind: null,
           hasAttachment: runAttachments.length > 0,
-          userQueryTokens: userText.length > 0 ? Math.ceil(userText.length / 4) : 0,
+          userQueryTokens: userText.length > 0 ? Math.ceil(userText.length / 4) : 0, // // 估算用户查询的token数
           model: config.model,
-          apiProtocol: config.apiProtocol,
-          skillId: project.skillId ?? null,
+          apiProtocol: config.apiProtocol, // API协议
+          skillId: project.skillId ?? null, // 技能ID
           sessionMode: (runSessionMode === 'design' ? 'design' : 'ask') as
             | 'design'
             | 'ask',
         };
-        trackRunCreated(analytics.track, buildByokRunCreatedProps(byokRunBase));
+        trackRunCreated(analytics.track, buildByokRunCreatedProps(byokRunBase)); // 立即发送 run_created 事件，标记BYOK运行开始
         const byokRunStartedAt = startedAt;
-        let accumulatedAssistantText = '';
+        let accumulatedAssistantText = ''; // accumulatedAssistantText 用于累积助手的回复文本，检查是否包含提问表单
         const emitByokRunFinished = (
           result: 'success' | 'failed' | 'cancelled',
           artifactCount: number,
@@ -4485,15 +4490,15 @@ export function ProjectView({
             analytics.track,
             buildByokRunFinishedProps({
               ...byokRunBase,
-              result,
-              artifactCount,
-              askedUserQuestion: accumulatedAssistantText.includes('<question-form'),
-              totalDurationMs: Math.max(0, Date.now() - byokRunStartedAt),
+              result, // 运行结果
+              artifactCount, // 生成的产物数量
+              askedUserQuestion: accumulatedAssistantText.includes('<question-form'), // 是否向用户提问
+              totalDurationMs: Math.max(0, Date.now() - byokRunStartedAt), // 总耗时（毫秒）
             }),
           );
         };
         
-        // 通过流式传输发送消息
+        // 2. TODO 通过流式传输发送消息
         void streamMessage(config, systemPrompt, apiHistory, controller.signal, {
           // 文本增量回调
           onDelta: (delta) => {
@@ -4505,11 +4510,9 @@ export function ProjectView({
           // 完成回调
           onDone: () => {
             handlers.onDone();
-            // Count artifacts produced this turn from the project file diff,
-            // mirroring the daemon's run_finished artifact_count. The
-            // artifact-count refresh is best-effort: a rejected refetch must
-            // NOT swallow run_finished, or a successful BYOK turn leaves the
-            // funnel hanging at run_created — the exact gap this path closes.
+            // 从项目文件差异中统计本轮生成的产物数量，与守护进程的 run_finished artifact_count 保持一致。
+            // 产物数量的刷新是尽力而为的：被拒绝的重新获取绝不能吞掉 run_finished 事件，
+            // 否则一次成功的 BYOK 轮次会使漏斗停留在 run_created 状态——而这正是此路径要解决的确切缺口。
             void (async () => {
               let artifactCount = 0;
               try {

@@ -16,6 +16,7 @@ export async function streamMessageOpenAI(
   signal: AbortSignal,
   handlers: StreamHandlers,
 ): Promise<void> {
+  // TODO 发送消息到OpenAI API，这里调用 apps\daemon\src\routes\chat.ts 中的  app.post('/api/proxy/openai/stream',xxx的方法
   return streamProxyEndpoint('/api/proxy/openai/stream', cfg, system, history, signal, handlers);
 }
 
