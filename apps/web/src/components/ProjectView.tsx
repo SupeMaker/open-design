@@ -4152,10 +4152,6 @@ export function ProjectView({
                 }),
                 producedFiles: producedBeforeFallback,
                 readProjectHtml,
-<<<<<<< Updated upstream
-=======
-                allowAnyHtmlWrite: assistantAgentId === 'claude', // Claude代理允许任何HTML写入
->>>>>>> Stashed changes
               });
               
               if (sameTurnHtmlWrite) { // 如果在同一轮次有HTML写入
@@ -4301,7 +4297,6 @@ export function ProjectView({
           ...(sessionTurn
             ? { turnIndex: sessionTurn.turnIndex, isFirstRun: sessionTurn.isFirstRun } // 添加轮次索引和是否首次运行的标记
             : {}),
-<<<<<<< Updated upstream
           hasExistingArtifact,
           // This branch only runs in daemon (local-execution) mode, so the
           // runtime is the bundled AMR cloud agent or a local coding CLI —
@@ -4309,9 +4304,6 @@ export function ProjectView({
           // the authoritative value so run_created/run_finished split AMR vs
           // CLI without relying on its agent-id re-derivation.
           runtimeType: config.agentId === 'amr' ? ('amr_cloud' as const) : ('local_cli' as const),
-=======
-          hasExistingArtifact, // 是否已有工件的标记
->>>>>>> Stashed changes
         };
         
         // 通过守护进程流式传输消息
@@ -4461,7 +4453,6 @@ export function ProjectView({
         
         // 推送请求状态事件，显示正在请求的模型
         pushEvent({ kind: 'status', label: 'requesting', detail: config.model });
-<<<<<<< Updated upstream
         // BYOK runs stream client-side and never reach the daemon, so the
         // daemon's authoritative run_created/run_finished are never emitted for
         // them. Emit them here so BYOK runs are counted in the run funnel; the
@@ -4501,13 +4492,8 @@ export function ProjectView({
             }),
           );
         };
-=======
-        
-        // 初始化累积的助手文本
-        let accumulatedAssistantText = '';
         
         // 通过流式传输发送消息
->>>>>>> Stashed changes
         void streamMessage(config, systemPrompt, apiHistory, controller.signal, {
           // 文本增量回调
           onDelta: (delta) => {
@@ -4518,7 +4504,6 @@ export function ProjectView({
           
           // 完成回调
           onDone: () => {
-<<<<<<< Updated upstream
             handlers.onDone();
             // Count artifacts produced this turn from the project file diff,
             // mirroring the daemon's run_finished artifact_count. The
@@ -4539,14 +4524,6 @@ export function ProjectView({
             })();
             const assistantText = accumulatedAssistantText.trim();
             if (userText.length === 0 || assistantText.length === 0) return;
-=======
-            handlers.onDone(); // 调用通用完成处理器
-            
-            const assistantText = accumulatedAssistantText.trim(); // 获取累积的助手文本
-            if (userText.length === 0 || assistantText.length === 0) return; // 用户或助手文本为空则不提取记忆
-            
-            // 对话完成后提取记忆（用户+助手完整交换）
->>>>>>> Stashed changes
             void fetch('/api/memory/extract', {
               method: 'POST', // HTTP POST请求
               headers: { 'Content-Type': 'application/json' }, // 设置内容类型为JSON
@@ -4561,16 +4538,10 @@ export function ProjectView({
               // 尽力而为：参见上文关于轮次前调用的注释
             });
           },
-<<<<<<< Updated upstream
           onError: (err: Error) => {
             handlers.onError(err);
             emitByokRunFinished(controller.signal.aborted ? 'cancelled' : 'failed', 0);
           },
-=======
-          
-          // 错误回调
-          onError: handlers.onError,
->>>>>>> Stashed changes
         }, {
           projectId: project.id, // 项目ID
           // SenseAudio BYOK聊天读取此字段以预填充工具参数的默认模型。

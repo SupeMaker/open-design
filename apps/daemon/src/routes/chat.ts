@@ -2253,7 +2253,6 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     routeByModel: true,
   });
 
-<<<<<<< Updated upstream:apps/daemon/src/routes/chat.ts
   app.post('/api/proxy/:provider/stream', (req, res) => {
     const proxyBody = req.body || {};
     const provider = typeof req.params.provider === 'string' ? req.params.provider : 'unknown';
@@ -2266,7 +2265,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     });
     if (reasoningDenial) return sendReasoningEgressDenial(res, reasoningDenial);
     return sendApiError(res, 404, 'NOT_FOUND', 'unknown proxy provider');
-=======
+  });
   // Agnes: fixed-origin OpenAI-compatible gateway for chat completions,
   // image generation (/v1/images/generations) and async video generation
   // (/v1/videos submit → /agnesapi poll). Bearer auth; no model-name divert.
@@ -2282,7 +2281,6 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     runVideo: executeAgnesGenerateVideo,
     // Agnes does not expose a speech endpoint through this gateway.
     runSpeech: async () => ({ ok: false, error: 'speech generation is not supported for Agnes' }),
->>>>>>> Stashed changes:apps/daemon/src/chat-routes.ts
   });
 
 }
