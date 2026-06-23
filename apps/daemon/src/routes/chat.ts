@@ -485,13 +485,16 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      // 一次获取多条数据
       buffer += decoder.decode(value, { stream: true });
 
       while (true) {
         const match = buffer.match(/\r?\n\r?\n/);
         if (!match || match.index === undefined) break;
+        // 遍历每一个chunk数据
         const frame = buffer.slice(0, match.index);
         buffer = buffer.slice(match.index + match[0].length);
+        // 调用传递进来的onFrame回调
         if (await onFrame(collectSseFrame(frame))) {
           // Fire-and-forget cancel: awaiting hangs on some response-stream
           // implementations (notably Response built from Uint8Array body,
@@ -996,6 +999,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     try {
       proxyDispatcher = proxyDispatcherRequestInit();
       sse.send('start', { model });
+      // TODO 通过http调用远端的模型
       const response = await fetch(url, {
         ...proxyDispatcher.requestInit,
         method: 'POST',
@@ -1025,7 +1029,9 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
       }
 
       let ended = false;
+      // 安全检查机制
       const guard = createDeltaGuard(sse);
+      // TODO 远端模型返回的数据
       await streamUpstreamSse(response, ({ payload, data }: any) => {
         if (payload === '[DONE]') {
           sse.send('end', {});
@@ -1039,8 +1045,10 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
           ended = true;
           return true;
         }
+        // 获取delta数据（文本等）
         const delta = extractOpenAIText(data);
         if (delta) { 
+          // 先做安全检查，然后发送
           guard.sendDelta(delta); 
           if (guard.contaminated) { 
             sse.send('end', {}); 

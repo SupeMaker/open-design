@@ -4296,6 +4296,16 @@ export function ProjectView({
             // artifact-count refresh is best-effort: a rejected refetch must
             // NOT swallow run_finished, or a successful BYOK turn leaves the
             // funnel hanging at run_created — the exact gap this path closes.
+            /*
+            void (async () => { ... })() 是一个立即调用的异步函数表达式（IIAFE）
+            (async () => { ... }) — 定义一个匿名异步函数
+            () — 紧跟的括号立即调用它
+             void — 将返回值（一个 Promise）丢弃，明确表示“我不关心这个 Promise 的结果”
+
+             所以它等价于：
+              const doWork = async () => { };
+              void doWork();  // 立即调用，忽略返回的 Promise
+            */
             void (async () => {
               let artifactCount = 0;
               try {

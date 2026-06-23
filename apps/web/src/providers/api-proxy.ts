@@ -49,6 +49,7 @@ export async function streamProxyEndpoint(
 
   try {
     const messages = await buildProxyMessages(endpoint, history, context);
+    // TODO 直接通过 http 调用远端的模型
     const resp = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -90,11 +91,13 @@ export async function streamProxyEndpoint(
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
+      // 这里会一次取到多条数据
       buf += decoder.decode(value, { stream: true });
 
       while (true) {
         const match = buf.match(/\r?\n\r?\n/);
         if (!match || match.index === undefined) break;
+        // 遍历每一个chunk数据
         const frame = buf.slice(0, match.index);
         buf = buf.slice(match.index + match[0].length);
 
@@ -104,7 +107,9 @@ export async function streamProxyEndpoint(
         if (parsed.event === 'delta') {
           const text = String(parsed.data.delta ?? parsed.data.text ?? '');
           if (text) {
+            // 拼接所有delta数据
             acc += text;
+            // 调用传递进来的onDelta回调
             handlers.onDelta(text);
           }
           continue;
