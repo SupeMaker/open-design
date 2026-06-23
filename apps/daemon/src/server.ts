@@ -4053,7 +4053,7 @@ export function createSseResponse(
 
   return {
     /** @param {ChatSseEvent['event'] | ProxySseEvent['event'] | string} event */
-    send(event, data, id: string | number | null | undefined = null) {
+    send(event, data, id: string | number | null | undefined = null) { // 发送消息
       if (!canWrite()) return false;
       // Assemble the full SSE event into a single write so id/event/data land
       // in one TCP chunk. Three separate writes would let `event: <type>` flush

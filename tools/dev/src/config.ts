@@ -144,7 +144,7 @@ export function parsePortOption(value: number | string | null | undefined, optio
 }
 
 export function resolveToolDevConfig(options: ToolDevOptions = {}): ToolDevConfig {
-  const namespace = resolveNamespace({ namespace: options.namespace, env: process.env, contract: OPEN_DESIGN_SIDECAR_CONTRACT });
+  const namespace = resolveNamespace({ namespace: options.namespace, env: process.env, contract: OPEN_DESIGN_SIDECAR_CONTRACT }); // 'default'
   const toolsDevRoot = resolveSidecarBase({
     base: options.toolsDevRoot ?? process.env[SIDECAR_ENV.BASE] ?? resolveSourceRuntimeRoot({
       contract: OPEN_DESIGN_SIDECAR_CONTRACT,
@@ -155,12 +155,12 @@ export function resolveToolDevConfig(options: ToolDevOptions = {}): ToolDevConfi
     env: process.env,
     projectRoot: WORKSPACE_ROOT,
     source: SIDECAR_SOURCES.TOOLS_DEV,
-  });
-  const namespaceRoot = resolveNamespaceRoot({ base: toolsDevRoot, namespace, contract: OPEN_DESIGN_SIDECAR_CONTRACT });
-  const daemon = resolveAppConfig({ app: APP_KEYS.DAEMON, namespace, namespaceRoot, toolsDevRoot });
-  const desktop = resolveAppConfig({ app: APP_KEYS.DESKTOP, namespace, namespaceRoot, toolsDevRoot });
-  const web = resolveAppConfig({ app: APP_KEYS.WEB, namespace, namespaceRoot, toolsDevRoot });
-  const desktopPackageJsonPath = path.join(WORKSPACE_ROOT, "apps/desktop/package.json");
+  }); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev"
+  const namespaceRoot = resolveNamespaceRoot({ base: toolsDevRoot, namespace, contract: OPEN_DESIGN_SIDECAR_CONTRACT }); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default"
+  const daemon = resolveAppConfig({ app: APP_KEYS.DAEMON, namespace, namespaceRoot, toolsDevRoot }); /* {app: "daemon", ipcPath: "\\\\.\\pipe\\open-design-default-daemon", latestLogPath: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\daemon\\latest.log", logDir: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\daemon",} */
+  const desktop = resolveAppConfig({ app: APP_KEYS.DESKTOP, namespace, namespaceRoot, toolsDevRoot }); /* {app: "desktop",ipcPath: "\\\\.\\pipe\\open-design-default-desktop",latestLogPath: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\desktop\\latest.log",logDir: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\desktop",} */
+  const web = resolveAppConfig({ app: APP_KEYS.WEB, namespace, namespaceRoot, toolsDevRoot }); /*{app: "web",ipcPath: "\\\\.\\pipe\\open-design-default-web",latestLogPath: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\web\\latest.log",logDir: "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\logs\\web",} */
+  const desktopPackageJsonPath = path.join(WORKSPACE_ROOT, "apps/desktop/package.json"); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\desktop\\package.json"
   let cachedElectronBinaryPath: string | undefined;
 
   return {

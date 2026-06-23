@@ -1211,7 +1211,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
 
     try {
       const { id, name, projectLocationId, skillId, designSystemId, pendingPrompt, metadata, customInstructions, skipDiscoveryBrief } =
-        req.body || {};
+        req.body || {}; /* metadata:{"kind": 'other', "linkedDirs": ['C:\\Users\\17875\\...\\design1'](为选中的工作目录)} */
       if (typeof id !== 'string' || !isSafeId(id)) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'invalid project id');
       }

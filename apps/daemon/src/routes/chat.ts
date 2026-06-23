@@ -524,14 +524,14 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      buffer += decoder.decode(value, { stream: true }); // 这里一次获取几条信息
 
       while (true) {
         const match = buffer.match(/\r?\n\r?\n/);
         if (!match || match.index === undefined) break;
-        const frame = buffer.slice(0, match.index);
+        const frame = buffer.slice(0, match.index); // 这里一条一条回复
         buffer = buffer.slice(match.index + match[0].length);
-        if (await onFrame(collectSseFrame(frame))) {
+        if (await onFrame(collectSseFrame(frame))) { // 这里执行传递进来的函数
           // Fire-and-forget cancel: awaiting hangs on some response-stream
           // implementations (notably Response built from Uint8Array body,
           // exposed by tests/proxy-routes.test.ts ollama case where the
@@ -643,11 +643,11 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
   function createDeltaGuard(sse: any) {
     const guard = createRoleMarkerGuard('proxy');
     return {
-      sendDelta(text: string) {
+      sendDelta(text: string) { // 做安全检查
         if (guard.contaminated || !text) return;
         const safe = guard.feedText(text);
         if (safe.length > 0) {
-          sse.send('delta', { delta: safe });
+          sse.send('delta', { delta: safe }); // 安全检查过后才发送消息
         }
         if (guard.contaminated) {
           const warn = guard.warningEvent();
@@ -988,6 +988,43 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
       {
         role: "user",
         content: "沉浸式单页视差落地页：粘性视口随滚动将传送门图像放大推近，入场时帷幕滑开，第二幕以弧形卡片滑块展示九个梦境世界。",
+      },
+      // 后面是进行过一轮对话之后的
+      {
+        role: "assistant",
+        content: `Got it — pitch deck for a SaaS product, B2B audience. Tell me the rest: what are we making? (Slide deck / pitch), target platform(s) (responsive web, desktop web, iOS app, Android app, tablet app, desktop app, fixed canvas 1920×1080), visual tone/editorial/magazine/minimal/playful/tech/luxury/brutalist/human, brand context (pick a direction / have spec / reference site), scale/content amount, and any constraints.
+
+        <question-form id="discovery">
+        {
+          "description": "I'll lock these in before building. Skip what doesn't apply — I'll fill defaults.",
+          "questions": [
+            {
+              "id": "output",
+              "label": "What are we making?",
+              "type": "radio",
+              "required": true,
+              "options": ["Slide deck / pitch", "Single web prototype / landing", "Multi-screen app prototype", "Dashboard / tool UI", "Editorial / marketing page", "Other — I'll describe"] },
+            {
+              "id": "platform",
+              "label": "Target platform",
+              "type": "checkbox",
+              "maxSelections": 4,
+              "options": ["Responsive web", "Desktop web", "iOS app", "Android app", "Tablet app", "Desktop app", "Fixed canvas (1920×1080)"] },
+            {
+              "id": "audience",
+              "label": "Who is this for?",
+              "type": "text",
+              "placeholder": "Target user, buyer, viewer, or audience..." }
+          ]
+        }
+        </question-form>`,
+      },
+      {
+        role: "user",
+        content: `[form answers — discovery]
+        - What are we making?: (skipped)
+        - Target platform: (skipped)
+        - Who is this for?: (skipped)`,
       }
     ],
     model: "qwen3.5-2b",
@@ -1032,7 +1069,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
 
     const payloadMessages = Array.isArray(messages) ? [...messages] : [];
     if (typeof systemPrompt === 'string' && systemPrompt) {
-      payloadMessages.unshift({ role: 'system', content: systemPrompt });
+      payloadMessages.unshift({ role: 'system', content: systemPrompt }); // 在index_0的位置插入system信息
     }
 
     const payload: any = {
@@ -1045,12 +1082,12 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
       stream: true,
     };
 
-    const sse = createSseResponse(res);
+    const sse = createSseResponse(res); // 创建 sse对象
     let proxyDispatcher: ReturnType<typeof proxyDispatcherRequestInit> | null = null;
     try {
       proxyDispatcher = proxyDispatcherRequestInit();
       sse.send('start', { model });
-      const response = await fetch(url, {
+      const response = await fetch(url, { // TODO 通过http请求调用模型
         ...proxyDispatcher.requestInit,
         method: 'POST',
         headers: {
@@ -1080,7 +1117,7 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
 
       let ended = false;
       const guard = createDeltaGuard(sse);
-      await streamUpstreamSse(response, ({ payload, data }: any) => {
+      await streamUpstreamSse(response, ({ payload, data }: any) => { // TODO 流式相应
         if (payload === '[DONE]') {
           sse.send('end', {});
           ended = true;

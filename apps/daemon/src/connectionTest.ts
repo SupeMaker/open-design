@@ -497,14 +497,14 @@ function buildConnectionTestProxyDispatcher(
     process.platform,
     resolveSystemProxyEnv(),
     env,
-  );
+  ); // 获取系统的环境变量
   const allProxy = proxyEnv.ALL_PROXY ?? proxyEnv.all_proxy;
   const socksProxy = socksProxyUrl(allProxy);
   const httpProxyFromAll = isHttpOrHttpsProxy(allProxy);
   const httpProxy = proxyEnv.HTTP_PROXY ?? proxyEnv.http_proxy ?? httpProxyFromAll;
   const httpsProxy = proxyEnv.HTTPS_PROXY ?? proxyEnv.https_proxy ?? httpProxyFromAll;
-  const noProxy = mergeNoProxyWithLoopbackDefaults(proxyEnv.NO_PROXY ?? proxyEnv.no_proxy);
-  const proxyOptions = envProxyAgentOptions(options, httpProxy, httpsProxy, noProxy);
+  const noProxy = mergeNoProxyWithLoopbackDefaults(proxyEnv.NO_PROXY ?? proxyEnv.no_proxy); // 'localhost，127.0.0.1[::1]'
+  const proxyOptions = envProxyAgentOptions(options, httpProxy, httpsProxy, noProxy); // {"noProxy": 'localhost，127.0.0.1[::1]'}
   if (socksProxy && (httpProxy || httpsProxy) && (!httpProxy || !httpsProxy)) {
     return new NoProxyAwareMixedProxyAgent(
       noProxy,

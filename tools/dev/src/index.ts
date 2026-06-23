@@ -283,7 +283,7 @@ function printRunForegroundResult(started: Partial<Record<ToolDevAppName, unknow
 }
 
 function runtimeLookup(config: ToolDevConfig) {
-  return { base: config.toolsDevRoot, namespace: config.namespace };
+  return { base: config.toolsDevRoot, namespace: config.namespace }; // 
 }
 
 function appConfig(config: ToolDevConfig, appName: ToolDevAppName) {
@@ -342,11 +342,11 @@ async function runLoggedCommand(request: {
 function createAppStamp(config: ToolDevConfig, appName: ToolDevAppName) {
   const currentAppConfig = appConfig(config, appName);
   const stamp = {
-    app: appName,
-    ipc: currentAppConfig.ipcPath,
-    mode: "dev" as const,
-    namespace: config.namespace,
-    source: SIDECAR_SOURCES.TOOLS_DEV,
+    app: appName, // "daemon"
+    ipc: currentAppConfig.ipcPath, // "\\\\.\\pipe\\open-design-default-daemon"
+    mode: "dev" as const, // "dev"
+    namespace: config.namespace, // "default"
+    source: SIDECAR_SOURCES.TOOLS_DEV, // "tools-dev"
   };
 
   return {
@@ -440,7 +440,7 @@ async function spawnDaemonRuntime(
       // handshake left open.
       await logHandle.write(`[tools-dev] requiring desktop auth on /api/import/folder\n`);
     }
-    return await spawnSidecarRuntime({
+    return await spawnSidecarRuntime({ // TODO 启动deamon程序，使用异步的方式进行
       appName: APP_KEYS.DAEMON,
       config,
       env: {
@@ -522,8 +522,8 @@ async function latestMtimeMs(filePath: string): Promise<number> {
 }
 
 async function ensureDaemonCliBuild(config: ToolDevConfig, logHandle: FileHandle): Promise<void> {
-  const daemonRoot = path.join(config.workspaceRoot, "apps/daemon");
-  const distCliPath = path.join(daemonRoot, "dist/cli.js");
+  const daemonRoot = path.join(config.workspaceRoot, "apps/daemon"); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\daemon"
+  const distCliPath = path.join(daemonRoot, "dist/cli.js"); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\daemon\\dist\\cli.js"
   const distMtime = await latestMtimeMs(distCliPath);
   const sourceMtime = Math.max(
     await latestMtimeMs(path.join(daemonRoot, "src")),
@@ -546,9 +546,9 @@ async function ensureDaemonCliBuild(config: ToolDevConfig, logHandle: FileHandle
 }
 
 async function ensureWebDevNodeModules(config: ToolDevConfig): Promise<void> {
-  const webRuntimeRoot = path.dirname(config.apps.web.nextDistDir);
-  const runtimeNodeModules = path.join(webRuntimeRoot, "node_modules");
-  const webNodeModules = path.join(config.workspaceRoot, "apps/web/node_modules");
+  const webRuntimeRoot = path.dirname(config.apps.web.nextDistDir); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\web"
+  const runtimeNodeModules = path.join(webRuntimeRoot, "node_modules"); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\.tmp\\tools-dev\\default\\web\\node_modules"
+  const webNodeModules = path.join(config.workspaceRoot, "apps/web/node_modules"); // "C:\\Users\\17875\\Master\\projects\\github\\open-design\\apps\\web\\node_modules"
 
   await mkdir(webRuntimeRoot, { recursive: true });
   const current = await lstat(runtimeNodeModules).catch(() => null);
@@ -630,8 +630,8 @@ async function startDaemon(
   options: CliOptions,
   startOptions: { refreshWebOrigin?: boolean; requireDesktopAuth?: boolean } = {},
 ) {
-  const daemonPort = parsePortOption(options.daemonPort, "--daemon-port");
-  const webPort = parsePortOption(options.webPort, "--web-port");
+  const daemonPort = parsePortOption(options.daemonPort, "--daemon-port"); // daemon的端口
+  const webPort = parsePortOption(options.webPort, "--web-port"); // web的端口
   let existing = await inspectDaemonRuntime(runtimeLookup(config));
   const shouldRefreshWebOrigin = startOptions.refreshWebOrigin === true && webPort != null;
   const existingWeb = shouldRefreshWebOrigin
@@ -665,7 +665,7 @@ async function startDaemon(
   const desktopAlreadyRunning = await inspectDesktopRuntime(runtimeLookup(config));
   const requireDesktopAuth =
     (startOptions.requireDesktopAuth ?? false) || desktopAlreadyRunning != null;
-
+  // 这里启动daemon程序
   const spawned = await spawnDaemonRuntime(config, options, { requireDesktopAuth });
   try {
     const status = await waitForDaemonRuntime(runtimeLookup(config));
@@ -1042,13 +1042,13 @@ function stopOrderFor(targets: readonly ToolDevAppName[]): ToolDevAppName[] {
 }
 
 async function runForeground(config: ToolDevConfig, appName: string | undefined, options: CliOptions) {
-  const targets = resolveRunApps(appName);
+  const targets = resolveRunApps(appName); // ["daemon","web",]
   const foregroundOptions = { ...options, parentPid: process.pid };
   await resolveSharedPortsFromRunningState(targets, foregroundOptions, {
     daemonUrl: async () => (await inspectDaemonRuntime(runtimeLookup(config)))?.url,
     webUrl: async () => (await inspectWebRuntime(runtimeLookup(config)))?.url,
-  });
-  const started = await runSequential(targets, (target) => startApp(config, target, foregroundOptions, { targets }));
+  }); // TODO 启动target的每一个程序
+  const started = await runSequential(targets, (target) => startApp(config, target, foregroundOptions, { targets })); 
   printRunForegroundResult(started, options);
 
   let shuttingDown = false;
@@ -1108,7 +1108,7 @@ addPortOptions(addSharedOptions(cli.command("start [app]", "Start daemon, web, d
 addPortOptions(addSharedOptions(cli.command("run [app]", "Start apps and keep this command alive until interrupted"))).action(
   async (appName: string | undefined, options: CliOptions) => {
     assertSupportedNodeRuntimeForStart();
-    await runForeground(resolveToolDevConfig(options), appName, options);
+    await runForeground(resolveToolDevConfig(options), appName, options); // 解析ToolDev
   },
 );
 
